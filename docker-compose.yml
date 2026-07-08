@@ -1,0 +1,12 @@
+services:
+  media-manager:
+    build: .
+    container_name: media-manager
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./config:/config
+      - ./media:/media
+    ports:
+      - "8000:8000"
+    restart: unless-stopped

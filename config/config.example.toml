@@ -1,0 +1,76 @@
+[server]
+host = "0.0.0.0"
+port = 8000
+
+[scan]
+run_at_startup = false
+interval = "@every 6h"
+workers = 1
+
+[paths]
+config_dir = "/config"
+media_dir = "/media"
+
+[[libraries]]
+name = "Movies"
+kind = "movie"
+path = "/media/movies"
+
+[[libraries]]
+name = "TV Shows"
+kind = "series"
+path = "/media/tv"
+
+[[metadata_sources]]
+name = "tmdb"
+enabled = false
+priority = 10
+root_url = "https://api.themoviedb.org/3"
+api_key_env = "TMDB_API_KEY"
+
+[[metadata_sources]]
+name = "douban"
+enabled = false
+priority = 20
+root_url = "https://movie.douban.com"
+
+[[subtitle_sources]]
+name = "subtitle_best"
+enabled = false
+priority = 10
+root_url = "https://api.subtitle.best/share-sub/v1"
+search_url = "/search-movie"
+daily_download_limit = -1
+api_key_env = "SUBTITLE_BEST_API_KEY"
+languages = ["zh-CN", "zh-TW", "en"]
+
+[[subtitle_sources]]
+name = "assrt"
+enabled = false
+priority = 20
+root_url = "https://api.assrt.net/v1"
+daily_download_limit = -1
+token_env = "ASSRT_TOKEN"
+languages = ["zh-CN", "zh-TW"]
+
+[[subtitle_sources]]
+name = "a4k"
+enabled = false
+priority = 30
+root_url = "https://www.a4k.net"
+daily_download_limit = -1
+languages = ["zh-CN", "zh-TW", "en"]
+
+[subtitles]
+format = "emby"
+extensions = [".srt", ".ass", ".ssa"]
+default_languages = ["zh-CN", "zh-TW", "en"]
+
+[organizer.movie]
+directory_template = "{title} ({year})"
+file_template = "{title} ({year})"
+
+[organizer.series]
+show_template = "{title}"
+season_template = "Season {season:02d}"
+episode_template = "{title} - S{season:02d}E{episode:02d} - {episode_title}"
