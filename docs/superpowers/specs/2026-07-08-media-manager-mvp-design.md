@@ -1,118 +1,118 @@
-# Media Manager MVP Design
+# Media Manager MVP 设计
 
-## Status
+## 状态
 
-- Date: 2026-07-08
-- Status: Approved design, pending implementation plan
-- Scope: First usable MVP for manually managing local movie and series folders
+- 日期：2026-07-08
+- 状态：设计已批准，等待实现计划
+- 范围：第一版可用的本地电影和剧集目录管理工具
 
-## Goals
+## 目标
 
-Build the smallest useful web tool for local media organization:
+构建最小可用的 Web 工具，用于本地媒体整理：
 
-- Add media libraries and mark each as `movie` or `series`.
-- Show scanned media items from configured libraries.
-- Parse basic metadata from file and directory names.
-- Manually scrape metadata from TMDB.
-- Write scraped metadata as Emby/Jellyfin-compatible `.nfo` files beside media files.
-- Preview and execute directory/file renames.
-- Show detailed synchronous error messages when an operation fails.
+- 添加媒体目录，并将目录标记为 `movie` 或 `series`。
+- 展示已配置目录下扫描出的媒体条目。
+- 从文件名和目录名解析基础元数据。
+- 手工从 TMDB 刮削元数据。
+- 将刮削结果写成 Emby/Jellyfin 兼容的旁路 `.nfo` 文件。
+- 预览并执行目录和文件重命名。
+- 同步操作失败时展示详细错误信息。
 
-## Non-Goals
+## 非目标
 
-The MVP will not include:
+MVP 不包含：
 
-- Background jobs.
-- Automatic periodic scanning.
-- Automatic scraping.
-- Batch scraping.
-- Subtitle download.
-- Database indexing.
-- Advanced filtering, sorting, or complex UI flows.
-- Image/poster download.
-- Full actor/crew metadata.
+- 后台任务。
+- 自动周期扫描。
+- 自动刮削。
+- 批量刮削。
+- 字幕下载。
+- 数据库索引。
+- 高级筛选、排序或复杂 UI 流程。
+- 图片、海报下载。
+- 完整演员和剧组信息。
 
-## Architecture
+## 架构
 
-The frontend stays as a React + Vite single-page workbench.
+前端保持 React + Vite 单页工作台。
 
-The backend changes from `http.server` to FastAPI. FastAPI owns request parsing, validation, routing, and JSON error responses. Scanning, TMDB access, NFO generation, config writing, and rename planning stay in small plain Python modules so they can be tested without HTTP.
+后端从 `http.server` 改为 FastAPI。FastAPI 负责请求解析、校验、路由和 JSON 错误响应。扫描、TMDB 访问、NFO 生成、配置写入、重命名规划保留为小型普通 Python 模块，方便绕过 HTTP 直接测试。
 
-Persistent state stays minimal:
+持久化状态保持最少：
 
-- Media library configuration is stored in `/config/config.toml`.
-- Scraped metadata is stored as `.nfo` files beside media files.
-- No database, queue, or cache index is introduced for the MVP.
+- 媒体目录配置保存在 `/config/config.toml`。
+- 刮削后的元数据保存在媒体文件旁边的 `.nfo` 文件中。
+- MVP 不引入数据库、队列或缓存索引。
 
-The TMDB API key is read from configuration or environment, preferably `TMDB_API_KEY`. The key itself must not be committed.
+TMDB API 密钥从配置或环境变量读取，优先使用 `TMDB_API_KEY`。密钥本身不得提交到仓库。
 
-## User Flows
+## 用户流程
 
-### Add Media Library
+### 添加媒体目录
 
-The user enters:
+用户输入：
 
-- Library name.
-- Library type: `movie` or `series`.
-- Absolute path inside the mounted media tree.
+- 目录名称。
+- 目录类型：`movie` 或 `series`。
+- 媒体挂载目录内的绝对路径。
 
-The backend validates the path, appends the library to `/config/config.toml`, reloads config, and returns the updated library list. The UI refreshes the media list after saving.
+后端校验路径，将目录追加到 `/config/config.toml`，重新加载配置，并返回更新后的目录列表。前端保存后刷新媒体列表。
 
-### View Media List
+### 查看媒体列表
 
-The media list is produced by a synchronous scan of configured libraries.
+媒体列表由后端同步扫描已配置目录得到。
 
-Movie libraries treat a video file or its parent directory as one movie item. Series libraries treat the first directory under the library root as the show title and parse `SxxEyy` from file names when possible.
+电影目录把一个视频文件或其父目录视为一部电影。剧集目录把库根目录下的第一层目录视为剧名，并尽量从文件名解析 `SxxEyy`。
 
-Rows show:
+列表行展示：
 
-- Parsed title.
-- Year if found.
-- Type.
-- Season and episode for series.
-- File path.
-- Whether an `.nfo` already exists.
-- The latest operation error for that row, if any.
+- 解析出的标题。
+- 年份，如果能解析到。
+- 类型。
+- 剧集的季和集。
+- 文件路径。
+- 是否已有 `.nfo`。
+- 该行最近一次操作错误，如果存在。
 
-### Manual TMDB Scraping
+### 手工 TMDB 刮削
 
-The user starts scraping from one media row.
+用户从某个媒体行发起刮削。
 
-The backend searches TMDB using the parsed title, year, and media type. The UI shows candidate results instead of auto-selecting the first match. The user picks a candidate, then the backend fetches the selected TMDB details and writes `.nfo`.
+后端使用解析出的标题、年份和媒体类型搜索 TMDB。前端展示候选结果，不自动选择第一条。用户选择候选后，后端拉取所选 TMDB 详情并写入 `.nfo`。
 
-Movie output:
+电影输出：
 
-- `movie.nfo` in the movie directory.
+- 电影目录内的 `movie.nfo`。
 
-Series output:
+剧集输出：
 
-- `tvshow.nfo` in the show directory.
-- Episode `.nfo` beside the episode video when episode details are available.
+- 剧集目录内的 `tvshow.nfo`。
+- 如果能获得单集详情，在单集视频旁写同名 `.nfo`。
 
-The MVP writes only basic Emby/Jellyfin-compatible fields:
+MVP 只写 Emby/Jellyfin 可读取的基础字段：
 
-- Title.
-- Original title when available.
-- Year.
-- Overview.
-- TMDB ID.
-- Media type.
-- Season and episode fields for episodes.
+- 标题。
+- 原始标题，如果有。
+- 年份。
+- 简介。
+- TMDB ID。
+- 媒体类型。
+- 单集的季和集字段。
 
-### Rename Preview And Apply
+### 重命名预览和执行
 
-The user requests a rename preview for one media row.
+用户从某个媒体行请求重命名预览。
 
-The backend calculates target paths from the existing organizer templates. It returns source path, target path, related sidecar files, and blocking conflicts. The UI only enables execution when the preview has no blocking conflict.
+后端基于现有整理模板计算目标路径，返回源路径、目标路径、相关旁路文件和阻塞冲突。只有预览没有阻塞冲突时，前端才允许执行。
 
-The user can then apply the preview. Execution is synchronous and returns changed paths or a structured error.
+用户确认后执行预览结果。执行是同步操作，返回已变更路径或结构化错误。
 
-Rename execution covers:
+重命名执行覆盖：
 
-- The video file.
-- Same-stem subtitle files.
-- Same-stem episode `.nfo` files.
-- Movie directory or show directory only when it can be identified without touching unrelated parents.
+- 视频文件。
+- 同 stem 的字幕文件。
+- 同 stem 的单集 `.nfo` 文件。
+- 仅在能明确识别且不会触碰无关父目录时，才重命名电影目录或剧集根目录。
 
 ## API
 
@@ -125,11 +125,11 @@ Rename execution covers:
 - `POST /api/media/{id}/rename/preview`
 - `POST /api/media/{id}/rename/apply`
 
-Media IDs are generated from the current file path with a stable hash. Each operation rescans configured libraries and resolves the ID to a current file path. If a file has already moved, the API returns a not-found error and the UI refreshes the list.
+媒体 ID 由当前文件路径生成稳定 hash。每次操作都会重新扫描已配置目录，并通过 ID 找回当前文件路径。如果文件已经移动，API 返回未找到错误，前端刷新列表。
 
-## Error Handling
+## 错误处理
 
-All operations are synchronous. Failures return a JSON object shaped like:
+所有操作都是同步操作。失败时返回如下 JSON：
 
 ```json
 {
@@ -142,9 +142,9 @@ All operations are synchronous. Failures return a JSON object shaped like:
 }
 ```
 
-The frontend displays `message`, `detail`, and the related path when present. It does not replace detailed backend errors with generic copy.
+前端展示 `message`、`detail` 和相关路径。前端不把后端详细错误替换成泛化文案。
 
-Expected error codes include:
+预期错误码包括：
 
 - `invalid_library_path`
 - `config_write_failed`
@@ -157,55 +157,55 @@ Expected error codes include:
 - `rename_outside_library`
 - `rename_failed`
 
-## File Safety
+## 文件安全
 
-Rename operations are restricted to configured library roots.
+重命名操作限制在已配置的媒体目录根路径内。
 
-Preview checks:
+预览阶段检查：
 
-- Target path remains inside the same configured library root.
-- Target path does not already exist.
-- The operation has no duplicate targets.
-- Related sidecar files are moved only when they share the media file stem.
+- 目标路径仍在同一个已配置媒体目录根路径内。
+- 目标路径尚不存在。
+- 同一次操作没有重复目标。
+- 相关旁路文件只有在与媒体文件同 stem 时才移动。
 
-Apply revalidates the preview before changing files. If validation fails, no rename is attempted.
+执行阶段会重新校验预览结果后再改文件。如果校验失败，不执行任何重命名。
 
-## Frontend Shape
+## 前端形态
 
-The MVP stays a single workbench page with three sections:
+MVP 保持单页工作台，包含三块：
 
-- Media libraries: list and add form.
-- Media list: scanned rows with parsed metadata and NFO status.
-- Row actions: scrape metadata, choose TMDB candidate, preview rename, apply rename.
+- 媒体目录：列表和新增表单。
+- 媒体列表：扫描行、解析出的元数据和 NFO 状态。
+- 行操作：刮削元数据、选择 TMDB 候选、预览重命名、执行重命名。
 
-The UI should stay plain and operational. No landing page, no media portal design, and no complex navigation are needed.
+界面保持朴素、偏操作台。不需要落地页、影视门户式设计或复杂导航。
 
-## Testing
+## 测试
 
-Backend tests cover:
+后端测试覆盖：
 
-- Movie and series scanning.
-- Library config append.
-- TMDB client behavior with fake responses.
-- NFO XML generation.
-- Rename preview conflict detection.
-- Rename apply for video, same-stem subtitle, and same-stem NFO.
-- FastAPI endpoints for the main success paths and one structured failure.
+- 电影和剧集扫描。
+- 媒体目录配置追加。
+- 使用假响应验证 TMDB 客户端行为。
+- NFO XML 生成。
+- 重命名预览冲突检测。
+- 视频、同 stem 字幕、同 stem NFO 的重命名执行。
+- FastAPI 主要成功路径和一个结构化失败路径。
 
-Frontend verification covers:
+前端验证覆盖：
 
-- TypeScript build.
-- Basic rendering states for loading, error, empty media list, and media rows.
+- TypeScript 构建。
+- 加载、错误、空媒体列表、媒体行等基础渲染状态。
 
-No test should call the real TMDB API.
+测试不得调用真实 TMDB API。
 
-## Implementation Notes
+## 实现备注
 
-Use the existing project structure where possible. Keep changes focused:
+尽量沿用现有项目结构，保持改动聚焦：
 
-- Replace the backend HTTP entrypoint with FastAPI.
-- Keep scanner logic as a plain module.
-- Add small modules for TMDB, NFO, config writing, and rename planning.
-- Update Docker and README only for changed startup commands and dependencies.
+- 用 FastAPI 替换后端 HTTP 入口。
+- 扫描逻辑继续保留为普通模块。
+- 新增小模块处理 TMDB、NFO、配置写入和重命名规划。
+- 只因启动命令和依赖变化更新 Docker 与 README。
 
-Skipped for MVP: custom task system, database schema, provider abstraction, and UI framework. Add them only when the first real workflow proves they are needed.
+MVP 跳过：自定义任务系统、数据库 schema、provider 抽象、UI 框架。只有第一版真实工作流证明需要时再添加。
