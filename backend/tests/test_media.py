@@ -44,6 +44,28 @@ class ScanLibrariesTest(unittest.TestCase):
         self.assertEqual(items[1].season, 1)
         self.assertEqual(items[1].episode, 3)
         self.assertEqual(len(items[1].subtitles or []), 1)
+        self.assertTrue(items[0].id)
+        self.assertTrue(items[1].id)
+        self.assertEqual(items[0].library_path, str(root / "movies"))
+        self.assertEqual(items[1].library_path, str(root / "tv"))
+        self.assertEqual(items[0].nfo_path, str(movie.parent / "movie.nfo"))
+        self.assertEqual(items[1].nfo_path, str(episode.with_suffix(".nfo")))
+        self.assertFalse(items[0].has_nfo)
+        self.assertFalse(items[1].has_nfo)
+
+    def test_marks_existing_nfo(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            movie = root / "movies" / "Dune (2021)" / "Dune (2021).mkv"
+            nfo = movie.parent / "movie.nfo"
+            movie.parent.mkdir(parents=True)
+            movie.write_text("", encoding="utf-8")
+            nfo.write_text("<movie />", encoding="utf-8")
+
+            items = scan_libraries([Library("Movies", "movie", root / "movies")])
+
+        self.assertEqual(items[0].nfo_path, str(nfo))
+        self.assertTrue(items[0].has_nfo)
 
 
 if __name__ == "__main__":

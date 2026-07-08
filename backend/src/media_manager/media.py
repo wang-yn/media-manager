@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from hashlib import sha1
 from pathlib import Path
 import re
 
@@ -18,10 +19,21 @@ class MediaItem:
     title: str
     path: str
     library: str
+    library_path: str
     year: int | None = None
     season: int | None = None
     episode: int | None = None
     subtitles: list[str] | None = None
+    nfo_path: str | None = None
+    has_nfo: bool = False
+    id: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.id:
+            object.__setattr__(self, "id", sha1(self.path.encode("utf-8")).hexdigest()[:16])
+        if self.nfo_path is None:
+            object.__setattr__(self, "nfo_path", str(_nfo_path(self)))
+        object.__setattr__(self, "has_nfo", bool(self.nfo_path and Path(self.nfo_path).exists()))
 
     def to_dict(self) -> dict[str, object]:
         data = asdict(self)
@@ -56,6 +68,7 @@ def _movie_item(root: Path, video: Path, library_name: str) -> MediaItem:
         year=_year(title_source) or _year(video.stem),
         path=str(video),
         library=library_name,
+        library_path=str(root),
         subtitles=_sidecar_subtitles(video),
     )
 
@@ -74,12 +87,13 @@ def _series_item(root: Path, video: Path, library_name: str) -> MediaItem:
         episode=episode,
         path=str(video),
         library=library_name,
+        library_path=str(root),
         subtitles=_sidecar_subtitles(video),
     )
 
 
 def _unknown_item(video: Path, library_name: str) -> MediaItem:
-    return MediaItem(kind="unknown", title=_clean_title(video.stem), path=str(video), library=library_name)
+    return MediaItem(kind="unknown", title=_clean_title(video.stem), path=str(video), library=library_name, library_path=str(video.parent))
 
 
 def _clean_title(value: str) -> str:
@@ -108,3 +122,10 @@ def _sidecar_subtitles(video: Path) -> list[str]:
         for path in sorted(video.parent.glob(f"{video.stem}*"))
         if path.is_file() and path.suffix.lower() in SUBTITLE_EXTENSIONS
     ]
+
+
+def _nfo_path(item: MediaItem) -> Path:
+    video = Path(item.path)
+    if item.kind == "movie":
+        return video.parent / "movie.nfo"
+    return video.with_suffix(".nfo")

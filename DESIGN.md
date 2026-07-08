@@ -3,8 +3,8 @@
 ## Source of truth
 - Status: Draft
 - Last refreshed: 2026-07-08
-- Primary product surfaces: Web 管理工作台、Python 后端 API、TOML 配置、Docker 运行镜像
-- Evidence reviewed: 用户需求、空仓库状态、固定挂载目录 `/config` 与 `/media`、ChineseSubFinder 的 `pkg/settings/common_settings.go`、`pkg/settings/supplier_settings.go`、`pkg/ifaces/iSupplier.go`、`pkg/sub_formatter/emby/emby.go`、`docker/readme.md`
+- Primary product surfaces: Web 管理工作台、FastAPI 后端 API、TOML 配置、Docker 运行镜像
+- Evidence reviewed: 用户确认的 MVP spec、固定挂载目录 `/config` 与 `/media`、TMDB 手工刮削、Emby/Jellyfin NFO 结构
 
 ## Brand
 - Personality: 安静、可靠、偏运维工具感，适合长期运行和批量整理。
@@ -12,24 +12,24 @@
 - Avoid: 影视门户式推荐页、营销式首页、不可解释的自动改名。
 
 ## Product goals
-- Goals: 整理电影和电视剧目录；从多个来源刮削元数据；从多个来源下载字幕；通过 TOML 管理配置；容器化运行；兼容 Emby/Jellyfin 常见字幕命名。
-- Non-goals: 首版不做在线播放、用户账号体系、复杂分布式任务调度。
-- Success signals: 能识别电影/电视剧目录差异；能配置多个来源；能预览扫描结果；Docker 挂载路径固定且清晰。
+- Goals: 添加电影和电视剧目录；同步展示影视列表；从 TMDB 手工刮削元数据；写入旁路 `.nfo`；预览并执行目录/文件重命名；通过 TOML 管理配置；容器化运行。
+- Non-goals: 首版不做在线播放、用户账号体系、后台任务、自动扫描、自动刮削、批量刮削、字幕下载、数据库索引。
+- Success signals: 能识别电影/电视剧目录差异；能手工选择 TMDB 候选并写 NFO；能预览和执行安全重命名；失败时能看到具体错误。
 
 ## Personas and jobs
 - Primary personas: 自托管媒体库用户、Emby/Jellyfin 用户、NAS 或家庭服务器维护者。
-- User jobs: 扫描媒体库、识别影片和剧集、补全元数据、下载字幕、按规则整理文件名。
-- Key contexts of use: Docker 容器内后台运行，偶尔打开 Web 页面检查状态和处理失败项。
+- User jobs: 添加媒体目录、扫描媒体库、识别影片和剧集、补全元数据、按规则整理文件名。
+- Key contexts of use: Docker 容器内运行，用户打开 Web 页面手工处理媒体条目和失败项。
 
 ## Information architecture
-- Primary navigation: 工作台、媒体库、来源、任务、设置。
+- Primary navigation: 首版单页工作台。
 - Core routes/screens: 首版只实现单页工作台，后续再拆分路由。
 - Content hierarchy: 系统状态优先，其次是媒体库扫描结果，再是来源和配置摘要。
 
 ## Design principles
-- Principle 1: 所有会改动文件的操作先支持 dry-run/预览。
-- Principle 2: 来源是可替换适配器，核心流程不绑定某个站点；沿用 ChineseSubFinder 的供应商思想，但不复制旧队列、浏览器自动化和时间轴修复复杂度。
-- Tradeoffs: 首版保留同步扫描和简单内存结果，等真实长任务需求出现后再加队列和数据库。
+- Principle 1: 所有会改动文件的操作先支持预览。
+- Principle 2: 首版只接 TMDB，避免 provider 抽象和后台任务。
+- Tradeoffs: 首版保留同步扫描和路径 hash ID，等真实长任务需求出现后再加队列和数据库。
 
 ## Visual language
 - Color: 白/墨色底，少量绿色表示可用，琥珀色表示待处理，红色表示失败。
@@ -41,7 +41,7 @@
 
 ## Components
 - Existing components to reuse: 空仓库，无现成组件。
-- New/changed components: 状态条、媒体库表、来源列表、扫描结果表。
+- New/changed components: 状态条、媒体目录表单、媒体库表、TMDB 候选列表、重命名预览。
 - Variants and states: Loading、Empty、Error、Success、Disabled。
 - Token/component ownership: 前端 CSS 变量先放在 `frontend/src/style.css`。
 
@@ -67,11 +67,11 @@
 
 ## Content voice
 - Tone: 简洁、直接、可操作。
-- Terminology: 媒体库、电影、电视剧、季、集、元数据源、字幕源、整理规则。
+- Terminology: 媒体库、电影、电视剧、季、集、TMDB、NFO、整理规则。
 - Microcopy rules: 文件操作必须说明是预览还是执行。
 
 ## Implementation constraints
-- Framework/styling system: 后端 Python 标准库 HTTP 服务；前端 React + TypeScript + Vite；配置 TOML；首版不依赖数据库。
+- Framework/styling system: 后端 FastAPI；前端 React + TypeScript + Vite；配置 TOML；首版不依赖数据库。
 - Design-token constraints: 不引入 UI 框架，CSS 变量足够。
 - Performance constraints: 首版扫描为递归文件遍历，适合中小型库；超大库后续再加增量索引。
 - Compatibility constraints: 容器固定 `/config` 和 `/media`，目录规则兼容 Emby/Jellyfin/TinyMediaManager 常见结构。

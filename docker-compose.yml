@@ -4,6 +4,7 @@ services:
     container_name: media-manager
     environment:
       - TZ=Asia/Shanghai
+      - TMDB_API_KEY=${TMDB_API_KEY:-}
     volumes:
       - ./config:/config
       - ./media:/media

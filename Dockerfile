@@ -11,6 +11,7 @@ ENV PYTHONPATH=/app/backend/src
 ENV MEDIA_MANAGER_STATIC_DIR=/app/static
 COPY backend/ ./backend/
 COPY config/ ./config/
+RUN pip install --no-cache-dir ./backend
 COPY --from=frontend /app/frontend/dist ./static
 EXPOSE 8000
 CMD ["python", "-m", "media_manager.server"]

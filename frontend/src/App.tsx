@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 type Health = {
   status: string;
@@ -6,76 +6,165 @@ type Health = {
   media_dir: string;
 };
 
-type Source = {
+type Library = {
   name: string;
-  enabled: boolean;
-  priority: number;
-  root_url?: string;
-  daily_download_limit?: number;
-  languages?: string[];
-};
-
-type Config = {
-  libraries?: Array<{ name: string; kind: string; path: string }>;
-  metadata_sources?: Source[];
-  subtitle_sources?: Source[];
+  kind: "movie" | "series";
+  path: string;
 };
 
 type MediaItem = {
+  id: string;
   kind: string;
   title: string;
   path: string;
   library: string;
+  library_path: string;
   year?: number;
   season?: number;
   episode?: number;
   subtitles?: string[];
+  nfo_path?: string;
+  has_nfo?: boolean;
 };
 
-type Scan = {
+type MediaResponse = {
   count: number;
   items: MediaItem[];
 };
 
-const emptyScan: Scan = { count: 0, items: [] };
+type Candidate = {
+  id: number;
+  title: string;
+  year?: number;
+  overview?: string;
+  media_type: string;
+};
+
+type RenamePreview = {
+  can_apply: boolean;
+  conflicts: string[];
+  changes: Array<{ from: string; to: string }>;
+};
+
+type ApiError = {
+  error?: {
+    code?: string;
+    message?: string;
+    detail?: string;
+    path?: string;
+  };
+};
+
+const emptyMedia: MediaResponse = { count: 0, items: [] };
 
 export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
-  const [config, setConfig] = useState<Config>({});
-  const [scan, setScan] = useState<Scan>(emptyScan);
-  const [loading, setLoading] = useState(true);
+  const [libraries, setLibraries] = useState<Library[]>([]);
+  const [media, setMedia] = useState<MediaResponse>(emptyMedia);
+  const [form, setForm] = useState<Library>({ name: "", kind: "movie", path: "" });
+  const [candidates, setCandidates] = useState<Record<string, Candidate[]>>({});
+  const [previews, setPreviews] = useState<Record<string, RenamePreview>>({});
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
-    setLoading(true);
+    setBusy("refresh");
     setError(null);
     try {
-      const [healthRes, configRes, scanRes] = await Promise.all([
-        fetch("/api/health"),
-        fetch("/api/config"),
-        fetch("/api/scan"),
+      const [healthData, librariesData, mediaData] = await Promise.all([
+        request<Health>("/api/health"),
+        request<Library[]>("/api/libraries"),
+        request<MediaResponse>("/api/media"),
       ]);
-      if (!healthRes.ok || !configRes.ok || !scanRes.ok) {
-        throw new Error("API 返回异常");
-      }
-      setHealth(await healthRes.json());
-      setConfig(await configRes.json());
-      setScan(await scanRes.json());
+      setHealth(healthData);
+      setLibraries(librariesData);
+      setMedia(mediaData);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "无法连接后端");
+      setError(messageFrom(err));
     } finally {
-      setLoading(false);
+      setBusy(null);
+    }
+  }
+
+  async function addLibrary(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy("library");
+    setError(null);
+    try {
+      const updated = await request<Library[]>("/api/libraries", {
+        method: "POST",
+        body: JSON.stringify(form),
+      });
+      setLibraries(updated);
+      setForm({ name: "", kind: "movie", path: "" });
+      await refresh();
+    } catch (err) {
+      setError(messageFrom(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function searchMetadata(item: MediaItem) {
+    setBusy(`search:${item.id}`);
+    setError(null);
+    try {
+      const result = await request<{ results: Candidate[] }>(`/api/media/${item.id}/metadata/search`, { method: "POST" });
+      setCandidates((current) => ({ ...current, [item.id]: result.results }));
+    } catch (err) {
+      setError(messageFrom(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function applyMetadata(item: MediaItem, candidate: Candidate) {
+    setBusy(`metadata:${item.id}`);
+    setError(null);
+    try {
+      await request<{ nfo_path: string }>(`/api/media/${item.id}/metadata/apply`, {
+        method: "POST",
+        body: JSON.stringify({ tmdb_id: candidate.id }),
+      });
+      setCandidates((current) => ({ ...current, [item.id]: [] }));
+      await refresh();
+    } catch (err) {
+      setError(messageFrom(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function previewRename(item: MediaItem) {
+    setBusy(`preview:${item.id}`);
+    setError(null);
+    try {
+      const preview = await request<RenamePreview>(`/api/media/${item.id}/rename/preview`, { method: "POST" });
+      setPreviews((current) => ({ ...current, [item.id]: preview }));
+    } catch (err) {
+      setError(messageFrom(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function applyRename(item: MediaItem) {
+    setBusy(`rename:${item.id}`);
+    setError(null);
+    try {
+      await request(`/api/media/${item.id}/rename/apply`, { method: "POST" });
+      setPreviews((current) => ({ ...current, [item.id]: { can_apply: false, conflicts: [], changes: [] } }));
+      await refresh();
+    } catch (err) {
+      setError(messageFrom(err));
+    } finally {
+      setBusy(null);
     }
   }
 
   useEffect(() => {
     refresh();
   }, []);
-
-  const sources = useMemo(
-    () => [...(config.metadata_sources ?? []), ...(config.subtitle_sources ?? [])].sort((a, b) => a.priority - b.priority),
-    [config],
-  );
 
   return (
     <main className="shell">
@@ -84,8 +173,8 @@ export default function App() {
           <p className="eyebrow">Media Manager</p>
           <h1>影视媒体库工作台</h1>
         </div>
-        <button type="button" onClick={refresh} disabled={loading}>
-          {loading ? "刷新中" : "刷新"}
+        <button type="button" onClick={refresh} disabled={busy === "refresh"}>
+          {busy === "refresh" ? "刷新中" : "刷新"}
         </button>
       </header>
 
@@ -95,14 +184,25 @@ export default function App() {
         <Status label="后端" value={health?.status ?? "unknown"} tone={health?.status === "ok" ? "good" : "warn"} />
         <Status label="配置" value={health?.config ?? "-"} />
         <Status label="媒体目录" value={health?.media_dir ?? "-"} />
-        <Status label="已发现" value={`${scan.count} 个视频`} tone={scan.count > 0 ? "good" : "warn"} />
+        <Status label="已发现" value={`${media.count} 个视频`} tone={media.count > 0 ? "good" : "warn"} />
       </section>
 
-      <section className="layout">
-        <div className="panel">
-          <div className="section-head">
-            <h2>媒体库</h2>
-          </div>
+      <section className="panel">
+        <div className="section-head">
+          <h2>媒体目录</h2>
+        </div>
+        <form className="library-form" onSubmit={addLibrary}>
+          <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="名称" required />
+          <select value={form.kind} onChange={(event) => setForm({ ...form, kind: event.target.value as Library["kind"] })}>
+            <option value="movie">电影</option>
+            <option value="series">剧集</option>
+          </select>
+          <input value={form.path} onChange={(event) => setForm({ ...form, path: event.target.value })} placeholder="/media/movies" required />
+          <button type="submit" disabled={busy === "library"}>
+            添加
+          </button>
+        </form>
+        <div className="table-wrap">
           <table>
             <thead>
               <tr>
@@ -112,39 +212,29 @@ export default function App() {
               </tr>
             </thead>
             <tbody>
-              {(config.libraries ?? []).map((library) => (
+              {libraries.map((library) => (
                 <tr key={`${library.kind}:${library.path}`}>
                   <td>{library.name}</td>
                   <td>{library.kind}</td>
                   <td className="path">{library.path}</td>
                 </tr>
               ))}
+              {libraries.length === 0 ? (
+                <tr>
+                  <td colSpan={3} className="empty">
+                    未配置媒体目录
+                  </td>
+                </tr>
+              ) : null}
             </tbody>
           </table>
-        </div>
-
-        <div className="panel">
-          <div className="section-head">
-            <h2>来源</h2>
-          </div>
-          <div className="source-list">
-            {sources.map((source) => (
-              <article className="source" key={source.name}>
-                <div>
-                  <strong>{source.name}</strong>
-                  <span>{source.root_url ?? "local"}</span>
-                </div>
-                <small className={source.enabled ? "enabled" : "disabled"}>{source.enabled ? "启用" : "停用"}</small>
-              </article>
-            ))}
-          </div>
         </div>
       </section>
 
       <section className="panel">
         <div className="section-head">
-          <h2>扫描结果</h2>
-          <span>{loading ? "读取中" : `${scan.count} 项`}</span>
+          <h2>影视列表</h2>
+          <span>{media.count} 项</span>
         </div>
         <div className="table-wrap">
           <table>
@@ -153,23 +243,28 @@ export default function App() {
                 <th>标题</th>
                 <th>类型</th>
                 <th>季/集</th>
-                <th>字幕</th>
+                <th>NFO</th>
                 <th>路径</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
-              {scan.items.map((item) => (
-                <tr key={item.path}>
-                  <td>{item.year ? `${item.title} (${item.year})` : item.title}</td>
-                  <td>{item.kind}</td>
-                  <td>{item.season && item.episode ? `S${pad(item.season)}E${pad(item.episode)}` : "-"}</td>
-                  <td>{item.subtitles?.length ?? 0}</td>
-                  <td className="path">{item.path}</td>
-                </tr>
+              {media.items.map((item) => (
+                <Row
+                  key={item.id}
+                  item={item}
+                  candidates={candidates[item.id] ?? []}
+                  preview={previews[item.id]}
+                  busy={busy}
+                  onSearch={() => searchMetadata(item)}
+                  onApplyMetadata={(candidate) => applyMetadata(item, candidate)}
+                  onPreviewRename={() => previewRename(item)}
+                  onApplyRename={() => applyRename(item)}
+                />
               ))}
-              {!loading && scan.items.length === 0 ? (
+              {media.items.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="empty">
+                  <td colSpan={6} className="empty">
                     未发现视频
                   </td>
                 </tr>
@@ -182,6 +277,79 @@ export default function App() {
   );
 }
 
+function Row({
+  item,
+  candidates,
+  preview,
+  busy,
+  onSearch,
+  onApplyMetadata,
+  onPreviewRename,
+  onApplyRename,
+}: {
+  item: MediaItem;
+  candidates: Candidate[];
+  preview?: RenamePreview;
+  busy: string | null;
+  onSearch: () => void;
+  onApplyMetadata: (candidate: Candidate) => void;
+  onPreviewRename: () => void;
+  onApplyRename: () => void;
+}) {
+  return (
+    <>
+      <tr>
+        <td>{item.year ? `${item.title} (${item.year})` : item.title}</td>
+        <td>{item.kind}</td>
+        <td>{item.season && item.episode ? `S${pad(item.season)}E${pad(item.episode)}` : "-"}</td>
+        <td className={item.has_nfo ? "good" : "warn"}>{item.has_nfo ? "已有" : "缺失"}</td>
+        <td className="path">{item.path}</td>
+        <td>
+          <div className="actions">
+            <button type="button" onClick={onSearch} disabled={busy === `search:${item.id}`}>
+              刮削
+            </button>
+            <button type="button" onClick={onPreviewRename} disabled={busy === `preview:${item.id}`}>
+              预览改名
+            </button>
+            <button type="button" onClick={onApplyRename} disabled={!preview?.can_apply || busy === `rename:${item.id}`}>
+              执行改名
+            </button>
+          </div>
+        </td>
+      </tr>
+      {candidates.length > 0 ? (
+        <tr>
+          <td colSpan={6}>
+            <div className="inline-list">
+              {candidates.map((candidate) => (
+                <button key={candidate.id} type="button" className="candidate" onClick={() => onApplyMetadata(candidate)}>
+                  <strong>{candidate.year ? `${candidate.title} (${candidate.year})` : candidate.title}</strong>
+                  <span>{candidate.overview || "无简介"}</span>
+                </button>
+              ))}
+            </div>
+          </td>
+        </tr>
+      ) : null}
+      {preview ? (
+        <tr>
+          <td colSpan={6}>
+            <div className={preview.can_apply ? "preview" : "preview blocked"}>
+              {preview.conflicts.length > 0 ? <p>冲突：{preview.conflicts.join(", ")}</p> : null}
+              {preview.changes.map((change) => (
+                <p className="path" key={`${change.from}:${change.to}`}>
+                  {change.from} → {change.to}
+                </p>
+              ))}
+            </div>
+          </td>
+        </tr>
+      ) : null}
+    </>
+  );
+}
+
 function Status({ label, value, tone }: { label: string; value: string; tone?: "good" | "warn" }) {
   return (
     <div className="status">
@@ -189,6 +357,28 @@ function Status({ label, value, tone }: { label: string; value: string; tone?: "
       <strong className={tone ?? ""}>{value}</strong>
     </div>
   );
+}
+
+async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, {
+    headers: { "Content-Type": "application/json" },
+    ...init,
+  });
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : {};
+  if (!response.ok) {
+    throw data;
+  }
+  return data;
+}
+
+function messageFrom(err: unknown) {
+  const api = err as ApiError;
+  const error = api.error;
+  if (error?.message) {
+    return [error.message, error.detail, error.path].filter(Boolean).join("：");
+  }
+  return err instanceof Error ? err.message : "操作失败";
 }
 
 function pad(value: number) {

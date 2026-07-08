@@ -1,60 +1,105 @@
 from __future__ import annotations
 
-from http import HTTPStatus
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-import json
 import os
-from urllib.parse import urlparse
 
-from .config import AppConfig, load_config
-from .media import scan_libraries
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse, Response
+from pydantic import BaseModel
+import uvicorn
+
+from .config import AppConfig, append_library, load_config
+from .errors import AppError
+from .media import MediaItem, scan_libraries
+from .nfo import write_nfo
+from .rename import apply_rename, preview_rename
+from .tmdb import TMDBClient
 
 
 STATIC_DIR = Path(os.environ.get("MEDIA_MANAGER_STATIC_DIR", "frontend/dist")).resolve()
 
 
-class Handler(SimpleHTTPRequestHandler):
-    app_config: AppConfig
+class LibraryInput(BaseModel):
+    name: str
+    kind: str
+    path: str
 
-    def do_GET(self) -> None:
-        if self.path == "/api/health":
-            self._json({"status": "ok", "config": str(self.app_config.path), "media_dir": str(self.app_config.media_dir)})
-            return
-        if self.path == "/api/config":
-            self._json(_public_config(self.app_config.raw))
-            return
-        if self.path == "/api/scan":
-            items = [item.to_dict() for item in scan_libraries(self.app_config.libraries)]
-            self._json({"count": len(items), "items": items})
-            return
-        self._static()
 
-    def _json(self, payload: dict[str, Any], status: HTTPStatus = HTTPStatus.OK) -> None:
-        body = json.dumps(payload, ensure_ascii=False, indent=2).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+class MetadataApplyInput(BaseModel):
+    tmdb_id: int
 
-    def _static(self) -> None:
+
+def create_app(config: AppConfig | None = None) -> FastAPI:
+    app = FastAPI(title="Media Manager")
+    app.state.config = config or load_config()
+
+    @app.exception_handler(AppError)
+    async def app_error_handler(_: Request, exc: AppError) -> JSONResponse:
+        return JSONResponse(exc.payload(), status_code=exc.status)
+
+    @app.get("/api/health")
+    def health() -> dict[str, str]:
+        cfg = _config(app)
+        return {"status": "ok", "config": str(cfg.path), "media_dir": str(cfg.media_dir)}
+
+    @app.get("/api/libraries")
+    def libraries() -> list[dict[str, str]]:
+        return [_library_dict(library) for library in _config(app).libraries]
+
+    @app.post("/api/libraries")
+    def add_library(input: LibraryInput) -> list[dict[str, str]]:
+        if input.kind not in {"movie", "series"}:
+            raise AppError("invalid_library_path", "媒体目录类型必须是 movie 或 series", input.kind, input.path)
+        library_path = Path(input.path)
+        media_dir = _config(app).media_dir.resolve()
+        if not library_path.is_absolute() or not library_path.resolve().is_relative_to(media_dir):
+            raise AppError("invalid_library_path", "媒体目录必须是媒体根目录内的绝对路径", str(media_dir), input.path)
+        try:
+            append_library(_config(app).path, input.name, input.kind, library_path)
+        except OSError as exc:
+            raise AppError("config_write_failed", "写入配置失败", str(exc), input.path) from exc
+        app.state.config = load_config(_config(app).path)
+        return [_library_dict(library) for library in _config(app).libraries]
+
+    @app.get("/api/media")
+    def media() -> dict[str, object]:
+        items = [item.to_dict() for item in _scan(app)]
+        return {"count": len(items), "items": items}
+
+    @app.post("/api/media/{media_id}/metadata/search")
+    def metadata_search(media_id: str) -> dict[str, object]:
+        item = _find_media(app, media_id)
+        results = _tmdb(app).search(item.title, item.kind, item.year)
+        return {"results": results}
+
+    @app.post("/api/media/{media_id}/metadata/apply")
+    def metadata_apply(media_id: str, input: MetadataApplyInput) -> dict[str, str]:
+        item = _find_media(app, media_id)
+        metadata = _tmdb(app).details(item.kind, input.tmdb_id)
+        nfo_path = write_nfo(item, metadata)
+        return {"nfo_path": str(nfo_path)}
+
+    @app.post("/api/media/{media_id}/rename/preview")
+    def rename_preview(media_id: str) -> dict[str, object]:
+        return preview_rename(_find_media(app, media_id))
+
+    @app.post("/api/media/{media_id}/rename/apply")
+    def rename_apply(media_id: str) -> dict[str, object]:
+        return apply_rename(_find_media(app, media_id))
+
+    @app.get("/{path:path}")
+    def static(path: str) -> Response:
         if not STATIC_DIR.exists():
-            self._json({"status": "frontend_not_built", "static_dir": str(STATIC_DIR)}, HTTPStatus.NOT_FOUND)
-            return
-        request_path = urlparse(self.path).path
-        target = (STATIC_DIR / request_path.lstrip("/")).resolve()
+            return JSONResponse({"status": "frontend_not_built", "static_dir": str(STATIC_DIR)}, status_code=404)
+        target = (STATIC_DIR / path).resolve()
         if not target.is_relative_to(STATIC_DIR):
-            self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
-            return
-        if request_path == "/" or not target.exists():
+            return JSONResponse({"error": "not found"}, status_code=404)
+        if not path or not target.exists():
             target = STATIC_DIR / "index.html"
-        self.path = "/" + str(target.relative_to(STATIC_DIR))
-        super().do_GET()
+        return FileResponse(target)
 
-    def translate_path(self, path: str) -> str:
-        return str(STATIC_DIR / path.lstrip("/"))
+    return app
 
 
 def run() -> None:
@@ -62,23 +107,34 @@ def run() -> None:
     server_config = config.raw.get("server", {})
     host = str(os.environ.get("MEDIA_MANAGER_HOST", server_config.get("host", "0.0.0.0")))
     port = int(os.environ.get("MEDIA_MANAGER_PORT", server_config.get("port", 8000)))
-    Handler.app_config = config
-    httpd = ThreadingHTTPServer((host, port), Handler)
-    print(f"media-manager backend listening on http://{host}:{port}")
-    httpd.serve_forever()
+    uvicorn.run(create_app(config), host=host, port=port)
 
 
-def _public_config(raw: dict[str, Any]) -> dict[str, Any]:
-    hidden = {"api_key", "token", "password", "secret"}
+def _config(app: FastAPI) -> AppConfig:
+    return app.state.config
 
-    def scrub(value: Any) -> Any:
-        if isinstance(value, dict):
-            return {key: ("***" if key.lower() in hidden else scrub(item)) for key, item in value.items()}
-        if isinstance(value, list):
-            return [scrub(item) for item in value]
-        return value
 
-    return scrub(raw)
+def _scan(app: FastAPI) -> list[MediaItem]:
+    return scan_libraries(_config(app).libraries)
+
+
+def _find_media(app: FastAPI, media_id: str) -> MediaItem:
+    for item in _scan(app):
+        if item.id == media_id:
+            return item
+    raise AppError("media_not_found", "媒体条目不存在或已经移动", media_id, status=404)
+
+
+def _tmdb(app: FastAPI) -> TMDBClient:
+    raw = _config(app).raw
+    tmdb_config = raw.get("tmdb", {})
+    api_key_env = str(tmdb_config.get("api_key_env", "TMDB_API_KEY"))
+    api_key = os.environ.get(api_key_env) or str(tmdb_config.get("api_key", ""))
+    return TMDBClient(api_key)
+
+
+def _library_dict(library: Any) -> dict[str, str]:
+    return {"name": library.name, "kind": library.kind, "path": str(library.path)}
 
 
 if __name__ == "__main__":
