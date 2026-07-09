@@ -119,8 +119,8 @@ def _season_from_dirs(video: Path) -> int | None:
 def _sidecar_subtitles(video: Path) -> list[str]:
     return [
         str(path)
-        for path in sorted(video.parent.glob(f"{video.stem}*"))
-        if path.is_file() and path.suffix.lower() in SUBTITLE_EXTENSIONS
+        for path in sorted(video.parent.iterdir())
+        if path.is_file() and path.name.startswith(video.stem) and path.suffix.lower() in SUBTITLE_EXTENSIONS
     ]
 
 

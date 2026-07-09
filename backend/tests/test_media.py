@@ -67,6 +67,19 @@ class ScanLibrariesTest(unittest.TestCase):
         self.assertEqual(items[0].nfo_path, str(nfo))
         self.assertTrue(items[0].has_nfo)
 
+    def test_finds_sidecar_subtitles_when_name_contains_glob_characters(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            movie = root / "movies" / "Dune [1080p]" / "Dune [1080p].mkv"
+            subtitle = movie.with_suffix(".srt")
+            movie.parent.mkdir(parents=True)
+            movie.write_text("", encoding="utf-8")
+            subtitle.write_text("", encoding="utf-8")
+
+            items = scan_libraries([Library("Movies", "movie", root / "movies")])
+
+        self.assertEqual(items[0].subtitles, [str(subtitle)])
+
 
 if __name__ == "__main__":
     unittest.main()

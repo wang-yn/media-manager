@@ -189,6 +189,21 @@ class RenameTest(unittest.TestCase):
 
         self.assertIn(root / "Movies" / "Dune (2021)" / "Dune (2021).avi", targets)
 
+    def test_preview_moves_sidecars_when_name_contains_glob_characters(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            video = root / "Movies" / "Old" / "Dune [1080p].mkv"
+            nfo = video.with_suffix(".nfo")
+            video.parent.mkdir(parents=True)
+            video.write_text("", encoding="utf-8")
+            nfo.write_text("<movie />", encoding="utf-8")
+            item = MediaItem("movie", "Dune", str(video), "Movies", str(root / "Movies"), year=2021)
+
+            preview = preview_rename(item)
+            targets = {Path(change["to"]) for change in preview["changes"]}
+
+        self.assertIn(root / "Movies" / "Dune (2021)" / "Dune (2021).nfo", targets)
+
 
 if __name__ == "__main__":
     unittest.main()

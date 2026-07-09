@@ -95,8 +95,10 @@ def _changes(item: MediaItem) -> list[RenameChange]:
     video = Path(item.path)
     target_video = _target_video(item)
     changes: list[RenameChange] = [{"from": str(video), "to": str(target_video)}]
-    for sidecar in sorted(video.parent.glob(f"{video.stem}*")):
+    for sidecar in sorted(video.parent.iterdir()):
         if sidecar == video or not sidecar.is_file():
+            continue
+        if not sidecar.name.startswith(video.stem):
             continue
         if sidecar.suffix.lower() not in {".srt", ".ass", ".ssa", ".nfo"}:
             continue
