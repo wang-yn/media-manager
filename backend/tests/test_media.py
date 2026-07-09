@@ -80,6 +80,62 @@ class ScanLibrariesTest(unittest.TestCase):
 
         self.assertEqual(items[0].subtitles, [str(subtitle)])
 
+    def test_cleans_common_movie_release_names(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            matrix = (
+                root
+                / "movies"
+                / "The.Matrix.1999.1080p.BluRay.x264.DTS-FGT"
+                / "The.Matrix.1999.1080p.BluRay.x264.DTS-FGT.mkv"
+            )
+            dune = (
+                root
+                / "movies"
+                / "Dune.Part.Two.2024.2160p.WEB-DL.DDP5.1.Atmos.H.265-GROUP"
+                / "Dune.Part.Two.2024.2160p.WEB-DL.DDP5.1.Atmos.H.265-GROUP.mp4"
+            )
+            matrix.parent.mkdir(parents=True)
+            dune.parent.mkdir(parents=True)
+            matrix.write_text("", encoding="utf-8")
+            dune.write_text("", encoding="utf-8")
+
+            items = scan_libraries([Library("Movies", "movie", root / "movies")])
+
+        by_year = {item.year: item for item in items}
+        self.assertEqual(by_year[1999].title, "The Matrix")
+        self.assertEqual(by_year[2024].title, "Dune Part Two")
+
+    def test_cleans_common_series_release_names(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            last_of_us = (
+                root
+                / "tv"
+                / "The.Last.of.Us.S01.1080p.WEB-DL"
+                / "Season 01"
+                / "The.Last.of.Us.S01E02.Infected.1080p.WEB.H264-GROUP.mkv"
+            )
+            fallout = (
+                root
+                / "tv"
+                / "Fallout.2024.S01.2160p.AMZN.WEB-DL"
+                / "Season 01"
+                / "Fallout.2024.S01E01.The.End.2160p.AMZN.WEB-DL.DDP5.1.H.265-GROUP.avi"
+            )
+            last_of_us.parent.mkdir(parents=True)
+            fallout.parent.mkdir(parents=True)
+            last_of_us.write_text("", encoding="utf-8")
+            fallout.write_text("", encoding="utf-8")
+
+            items = scan_libraries([Library("TV Shows", "series", root / "tv")])
+
+        by_episode = {(item.season, item.episode): item for item in items}
+        self.assertEqual(by_episode[(1, 1)].title, "Fallout")
+        self.assertEqual(by_episode[(1, 1)].year, 2024)
+        self.assertEqual(by_episode[(1, 2)].title, "The Last of Us")
+        self.assertIsNone(by_episode[(1, 2)].year)
+
 
 if __name__ == "__main__":
     unittest.main()

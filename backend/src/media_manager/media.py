@@ -11,6 +11,21 @@ SUBTITLE_EXTENSIONS = {".srt", ".ass", ".ssa"}
 EPISODE_RE = re.compile(r"[Ss](?P<season>\d{1,2})[ ._-]?[Ee](?P<episode>\d{1,3})")
 SEASON_DIR_RE = re.compile(r"(?:season|s)[ ._-]?(?P<season>\d{1,2})", re.IGNORECASE)
 YEAR_RE = re.compile(r"(?:^|[ ._\-(])(?P<year>19\d{2}|20\d{2})(?:$|[ ._\-)])")
+RELEASE_MARKERS = {
+    "amzn",
+    "bdrip",
+    "bluray",
+    "brrip",
+    "dsnp",
+    "dvdrip",
+    "hdtv",
+    "hdrip",
+    "max",
+    "nf",
+    "web",
+    "web-dl",
+    "webrip",
+}
 
 
 @dataclass(frozen=True)
@@ -100,7 +115,23 @@ def _clean_title(value: str) -> str:
     value = YEAR_RE.sub(" ", value)
     value = re.sub(r"[._]+", " ", value)
     value = re.sub(r"\s+", " ", value)
-    return value.strip(" -")
+    tokens: list[str] = []
+    for token in value.strip(" -").split():
+        if _release_marker(token):
+            break
+        tokens.append(token)
+    return " ".join(tokens).strip(" -")
+
+
+def _release_marker(token: str) -> bool:
+    token = token.strip(" -[]()").lower()
+    return (
+        bool(re.fullmatch(r"s\d{1,2}", token))
+        or bool(re.fullmatch(r"\d{3,4}p", token))
+        or bool(re.fullmatch(r"[xh]26[45]", token))
+        or token.startswith(("ddp", "dts"))
+        or token in RELEASE_MARKERS
+    )
 
 
 def _year(value: str) -> int | None:
