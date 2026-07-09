@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Callable
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 import json
 
 from .errors import AppError
+from .media import MediaItem
 
 
 Opener = Callable[[Request, int], object]
+DIRECT_SUBTITLE_EXTENSIONS = {".srt", ".ass", ".ssa"}
 
 
 class AssrtClient:
@@ -95,3 +98,41 @@ class AssrtClient:
     def _message(self, payload: dict[str, object]) -> str | None:
         message = payload.get("message")
         return message if isinstance(message, str) else None
+
+
+def subtitle_query(item: MediaItem) -> str:
+    return Path(item.path).stem
+
+
+def download_subtitle(item: MediaItem, subtitle_id: int, client: object) -> Path:
+    detail = client.detail(subtitle_id)
+    entry = _direct_subtitle_entry(detail)
+    source_name = str(entry["f"])
+    source_url = str(entry["url"])
+    extension = Path(source_name).suffix.lower()
+    video = Path(item.path)
+    target = video.with_name(f"{video.stem}.zh{extension}")
+    if target.exists():
+        raise AppError("subtitle_target_exists", "字幕文件已存在", path=str(target))
+    content = client.download(source_url)
+    try:
+        target.write_bytes(content)
+    except OSError as exc:
+        raise AppError("subtitle_write_failed", "写入字幕文件失败", str(exc), str(target)) from exc
+    return target
+
+
+def _direct_subtitle_entry(detail: dict[str, object]) -> dict[str, object]:
+    filelist = detail.get("filelist", [])
+    if isinstance(filelist, list):
+        for item in filelist:
+            if isinstance(item, dict) and _direct_subtitle_name(str(item.get("f", ""))) and item.get("url"):
+                return item
+    filename = str(detail.get("filename", ""))
+    if _direct_subtitle_name(filename) and detail.get("url"):
+        return {"f": filename, "url": detail["url"]}
+    raise AppError("assrt_unsupported_archive", "当前只支持直接下载 srt、ass、ssa 字幕文件")
+
+
+def _direct_subtitle_name(name: str) -> bool:
+    return Path(name).suffix.lower() in DIRECT_SUBTITLE_EXTENSIONS

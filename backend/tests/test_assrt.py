@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from io import BytesIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import json
 import unittest
 
-from media_manager.assrt import AssrtClient
+from media_manager.assrt import AssrtClient, download_subtitle, subtitle_query
 from media_manager.errors import AppError
+from media_manager.media import MediaItem
 
 
 class FakeResponse(BytesIO):
@@ -118,6 +121,66 @@ class AssrtClientTest(unittest.TestCase):
         content = AssrtClient("token", opener=opener).download("https://file/sub.srt")
 
         self.assertEqual(content, b"subtitle")
+
+
+class FakeSubtitleClient:
+    def __init__(self, detail_payload: dict[str, object], content: bytes = b"subtitle") -> None:
+        self.detail_payload = detail_payload
+        self.content = content
+        self.downloaded_url = ""
+
+    def detail(self, subtitle_id: int) -> dict[str, object]:
+        return self.detail_payload
+
+    def download(self, url: str) -> bytes:
+        self.downloaded_url = url
+        return self.content
+
+
+class SubtitleDownloadTest(unittest.TestCase):
+    def test_subtitle_query_uses_video_stem(self) -> None:
+        item = MediaItem("movie", "The Matrix", "/media/The.Matrix.1999.1080p.BluRay.x264-GROUP.mkv", "Movies", "/media")
+
+        self.assertEqual(subtitle_query(item), "The.Matrix.1999.1080p.BluRay.x264-GROUP")
+
+    def test_download_subtitle_writes_direct_file_next_to_video(self) -> None:
+        with TemporaryDirectory() as tmp:
+            video = Path(tmp) / "The.Matrix.1999.1080p.BluRay.x264-GROUP.mkv"
+            video.write_text("", encoding="utf-8")
+            item = MediaItem("movie", "The Matrix", str(video), "Movies", str(Path(tmp)))
+            client = FakeSubtitleClient({"filelist": [{"f": "movie.srt", "url": "https://file/sub.srt"}]}, b"hello")
+
+            target = download_subtitle(item, 123456, client)
+
+            self.assertEqual(target.name, "The.Matrix.1999.1080p.BluRay.x264-GROUP.zh.srt")
+            self.assertEqual(client.downloaded_url, "https://file/sub.srt")
+            self.assertEqual(target.read_bytes(), b"hello")
+
+    def test_download_subtitle_rejects_existing_target(self) -> None:
+        with TemporaryDirectory() as tmp:
+            video = Path(tmp) / "Pantheon - S01E03.mkv"
+            target = Path(tmp) / "Pantheon - S01E03.zh.ass"
+            video.write_text("", encoding="utf-8")
+            target.write_text("old", encoding="utf-8")
+            item = MediaItem("series", "Pantheon", str(video), "TV", str(Path(tmp)), season=1, episode=3)
+            client = FakeSubtitleClient({"filelist": [{"f": "episode.ass", "url": "https://file/sub.ass"}]})
+
+            with self.assertRaises(AppError) as context:
+                download_subtitle(item, 123456, client)
+
+        self.assertEqual(context.exception.code, "subtitle_target_exists")
+
+    def test_download_subtitle_rejects_archive_only_result(self) -> None:
+        with TemporaryDirectory() as tmp:
+            video = Path(tmp) / "movie.mkv"
+            video.write_text("", encoding="utf-8")
+            item = MediaItem("movie", "Movie", str(video), "Movies", str(Path(tmp)))
+            client = FakeSubtitleClient({"filename": "movie.rar", "url": "https://file/movie.rar"})
+
+            with self.assertRaises(AppError) as context:
+                download_subtitle(item, 123456, client)
+
+        self.assertEqual(context.exception.code, "assrt_unsupported_archive")
 
 
 if __name__ == "__main__":
