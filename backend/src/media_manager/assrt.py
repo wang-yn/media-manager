@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Callable
+from urllib.error import HTTPError
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 import json
@@ -70,6 +71,11 @@ class AssrtClient:
                 payload = json.loads(response.read().decode("utf-8"))
         except AppError:
             raise
+        except HTTPError as exc:
+            try:
+                payload = json.loads(exc.read().decode("utf-8"))
+            except Exception as parse_exc:
+                raise AppError("assrt_request_failed", "ASSRT 请求失败", str(exc)) from parse_exc
         except Exception as exc:
             raise AppError("assrt_request_failed", "ASSRT 请求失败", str(exc)) from exc
         if not isinstance(payload, dict):

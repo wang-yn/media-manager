@@ -3,6 +3,7 @@ from __future__ import annotations
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from urllib.error import HTTPError
 import json
 import unittest
 
@@ -95,6 +96,23 @@ class AssrtClientTest(unittest.TestCase):
         with self.assertRaises(AppError) as quota_context:
             AssrtClient("token", opener=quota_error).search("Matrix")
         self.assertEqual(quota_context.exception.code, "assrt_quota_exceeded")
+
+    def test_http_error_body_uses_assrt_status_mapping(self) -> None:
+        def quota_error(request, timeout=10):
+            body = FakeResponse(json.dumps({"status": 30900, "message": "you are exceeding request limits"}).encode())
+            raise HTTPError(request.full_url, 429, "Too Many Requests", {}, body)
+
+        with self.assertRaises(AppError) as quota_context:
+            AssrtClient("token", opener=quota_error).search("Matrix")
+        self.assertEqual(quota_context.exception.code, "assrt_quota_exceeded")
+
+        def api_error(request, timeout=10):
+            body = FakeResponse(json.dumps({"status": 20900, "message": "subtitle not found"}).encode())
+            raise HTTPError(request.full_url, 404, "Not Found", {}, body)
+
+        with self.assertRaises(AppError) as api_context:
+            AssrtClient("token", opener=api_error).detail(123456)
+        self.assertEqual(api_context.exception.code, "assrt_api_error")
 
     def test_malformed_payload_is_structured(self) -> None:
         def opener(request, timeout=10):

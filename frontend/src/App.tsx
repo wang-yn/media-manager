@@ -238,7 +238,8 @@ export default function App() {
     if (dialog.selectedId === undefined) {
       return;
     }
-    setBusy(`subtitle-download:${dialog.item.id}`);
+    const busyKey = `subtitle-download:${dialog.item.id}`;
+    setBusy(busyKey);
     try {
       await request<{ path: string }>(`/api/media/${dialog.item.id}/subtitles/download`, {
         method: "POST",
@@ -249,7 +250,7 @@ export default function App() {
     } catch (err) {
       setSubtitleDialog((current) => (current?.item.id === dialog.item.id ? { ...current, error: messageFrom(err) } : current));
     } finally {
-      setBusy(null);
+      setBusy((current) => (current === busyKey ? null : current));
     }
   }
 
@@ -693,7 +694,7 @@ function SubtitleDialogView({
           {dialog.results.length === 0 && !searching ? <p className="empty">暂无候选</p> : null}
         </div>
         <div className="dialog-actions">
-          <button type="button" onClick={() => onDownload(dialog)} disabled={dialog.selectedId === undefined || downloading}>
+          <button type="button" onClick={() => onDownload(dialog)} disabled={dialog.selectedId === undefined || searching || downloading}>
             {downloading ? "下载中" : "下载字幕"}
           </button>
         </div>
