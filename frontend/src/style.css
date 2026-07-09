@@ -311,6 +311,73 @@ th {
   margin: 0;
 }
 
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(31, 41, 51, 0.45);
+}
+
+.dialog {
+  width: min(760px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  border: 1px solid #d6dee1;
+  border-radius: 8px;
+  background: #fff;
+  padding: 16px;
+}
+
+.subtitle-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.subtitle-results {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.subtitle-candidate {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-height: 0;
+  padding: 10px;
+  border-color: #c9d4d8;
+  background: #f8fbfc;
+  color: #1f2933;
+  text-align: left;
+}
+
+.subtitle-candidate.selected {
+  border-color: #1f6f64;
+  background: #f0fdf8;
+}
+
+.subtitle-candidate strong,
+.subtitle-candidate span,
+.subtitle-candidate small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.subtitle-candidate span,
+.subtitle-candidate small {
+  color: #52616b;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
 @media (max-width: 860px) {
   .summary,
   .library-form {
@@ -325,5 +392,9 @@ th {
   .top-actions {
     width: 100%;
     flex-direction: column;
+  }
+
+  .subtitle-form {
+    grid-template-columns: 1fr;
   }
 }
