@@ -55,6 +55,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         media_dir = _config(app).media_dir.resolve()
         if not library_path.is_absolute() or not library_path.resolve().is_relative_to(media_dir):
             raise AppError("invalid_library_path", "媒体目录必须是媒体根目录内的绝对路径", str(media_dir), input.path)
+        if not library_path.is_dir():
+            raise AppError("invalid_library_path", "媒体目录不存在或不是目录", path=input.path)
         try:
             append_library(_config(app).path, input.name, input.kind, library_path)
         except OSError as exc:

@@ -72,6 +72,22 @@ path = "{media_root / "movies"}"
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"]["code"], "invalid_library_path")
 
+    def test_rejects_missing_library_directory(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            media_root = root / "media"
+            media_root.mkdir()
+            config_path = root / "config.toml"
+            config_path.write_text(f"[paths]\nmedia_dir = \"{media_root}\"\n", encoding="utf-8")
+            os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
+            from media_manager.server import create_app
+
+            client = TestClient(create_app())
+            response = client.post("/api/libraries", json={"name": "Missing", "kind": "movie", "path": str(media_root / "missing")})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "invalid_library_path")
+
 
 if __name__ == "__main__":
     unittest.main()
