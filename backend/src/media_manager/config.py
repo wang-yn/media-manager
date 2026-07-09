@@ -35,6 +35,9 @@ def config_path() -> Path:
         return Path(configured)
     if DEFAULT_CONFIG.exists():
         return DEFAULT_CONFIG
+    development_config = EXAMPLE_CONFIG.with_name("config.toml")
+    if development_config.exists():
+        return development_config
     return EXAMPLE_CONFIG
 
 

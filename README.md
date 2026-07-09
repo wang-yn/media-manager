@@ -50,4 +50,4 @@ cd frontend && npm run build
 - `POST /api/media/{id}/rename/preview`
 - `POST /api/media/{id}/rename/apply`
 
-默认开发配置读取 `config/config.example.toml`。容器内默认读取 `/config/config.toml`，不存在时可用示例配置启动。
+本地开发默认优先读取 `config/config.toml`，不存在时读取 `config/config.example.toml`。容器内默认读取 `/config/config.toml`。

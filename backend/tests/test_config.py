@@ -1,13 +1,33 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
+from media_manager import config as config_module
 from media_manager.config import append_library, load_config
 
 
 class ConfigTest(unittest.TestCase):
+    def test_prefers_development_config_over_example_config(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            local_config = root / "config.toml"
+            example_config = root / "config.example.toml"
+            local_config.write_text("[paths]\nmedia_dir = \"/local-media\"\n", encoding="utf-8")
+            example_config.write_text("[paths]\nmedia_dir = \"/example-media\"\n", encoding="utf-8")
+
+            with (
+                patch.dict(os.environ, {}, clear=True),
+                patch.object(config_module, "DEFAULT_CONFIG", root / "missing.toml"),
+                patch.object(config_module, "EXAMPLE_CONFIG", example_config),
+            ):
+                config_path = config_module.config_path()
+
+        self.assertEqual(config_path, local_config)
+
     def test_appends_library_to_existing_config(self) -> None:
         with TemporaryDirectory() as tmp:
             config_path = Path(tmp) / "config.toml"
