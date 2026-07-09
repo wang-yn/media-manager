@@ -20,10 +20,10 @@ kind = "series"
 path = "/media/tv"
 
 [organizer.movie]
-directory_template = "{title} ({year})"
-file_template = "{title} ({year})"
+directory_template = "{original_title} - {title} ({year})"
+file_template = "{original_title} - {title} ({year})"
 
 [organizer.series]
-show_template = "{title}"
+show_template = "{original_title} - {title} ({year})"
 season_template = "Season {season:02d}"
-episode_template = "{title} - S{season:02d}E{episode:02d} - {episode_title}"
+episode_template = "{original_title} - {title} - S{season:02d}E{episode:02d}"

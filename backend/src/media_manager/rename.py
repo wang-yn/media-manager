@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import TypedDict
+import xml.etree.ElementTree as ET
 
 from .errors import AppError
 from .media import MediaItem
@@ -18,6 +19,40 @@ class RenamePreview(TypedDict):
 
 class RenameApplyResult(TypedDict):
     changes: list[RenameChange]
+
+
+class RenameName(TypedDict):
+    display: str
+    year: int | None
+
+
+def _target_name(item: MediaItem, nfo: Path) -> RenameName:
+    title, original, year = _nfo_values(nfo)
+    display = _join_titles(original, title) if title and original else item.title
+    return {"display": display, "year": year or item.year}
+
+
+def _nfo_values(path: Path) -> tuple[str, str, int | None]:
+    if not path.exists():
+        return "", "", None
+    try:
+        root = ET.parse(path).getroot()
+    except (OSError, ET.ParseError):
+        return "", "", None
+    title = (root.findtext("title") or "").strip()
+    original = (root.findtext("originaltitle") or "").strip()
+    year_text = (root.findtext("year") or "").strip()
+    return title, original, int(year_text) if year_text.isdigit() else None
+
+
+def _join_titles(original: str, local: str) -> str:
+    if original and local and original != local:
+        return f"{original} - {local}"
+    return original or local
+
+
+def _with_year(name: str, year: int | None) -> str:
+    return f"{name} ({year})" if year else name
 
 
 def preview_rename(item: MediaItem) -> RenamePreview:
@@ -73,18 +108,31 @@ def _changes(item: MediaItem) -> list[RenameChange]:
     return changes
 
 
+def _show_dir(item: MediaItem) -> Path:
+    video = Path(item.path)
+    library = Path(item.library_path)
+    try:
+        first = video.relative_to(library).parts[0]
+    except (ValueError, IndexError):
+        return video.parents[1]
+    return library / first
+
+
 def _target_video(item: MediaItem) -> Path:
     video = Path(item.path)
     library = Path(item.library_path)
     extension = video.suffix
     if item.kind == "movie":
-        name = item.title if item.year is None else f"{item.title} ({item.year})"
+        target = _target_name(item, video.parent / "movie.nfo")
+        name = _with_year(target["display"], target["year"])
         return library / name / f"{name}{extension}"
     if item.kind == "series":
         season = item.season or 1
         episode = item.episode or 1
-        show_dir = library / item.title
-        return show_dir / f"Season {season:02d}" / f"{item.title} - S{season:02d}E{episode:02d}{extension}"
+        target = _target_name(item, _show_dir(item) / "tvshow.nfo")
+        show_name = _with_year(target["display"], target["year"])
+        file_name = f'{target["display"]} - S{season:02d}E{episode:02d}'
+        return library / show_name / f"Season {season:02d}" / f"{file_name}{extension}"
     return video
 
 
