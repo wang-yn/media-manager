@@ -166,6 +166,9 @@ export default function App() {
   }
 
   async function applyRename(item: MediaItem) {
+    if (!window.confirm(`确认执行重命名并移动文件？\n\n${item.title}`)) {
+      return;
+    }
     setBusy(`rename:${item.id}`);
     setError(null);
     try {
