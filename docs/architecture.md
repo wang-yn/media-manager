@@ -14,6 +14,13 @@
 - 后端：`PYTHONPATH=backend/src python3 -m media_manager.server`
 - 前端：`npm run dev`，通过 Vite 代理访问后端
 
+## 前端交互模型
+
+- `#/` 是首屏，采用 Emby-like 媒体库入口，只展示媒体库卡片。
+- `#/libraries/<id>` 展示单个媒体库内容，并提供媒体条目的行级操作。
+- `#/settings` 承载系统状态、媒体目录管理和配置提示。
+- 设置功能不得出现在首页。
+
 ## Media Model
 
 电影和电视剧使用同一个扫描入口，输出不同类型：

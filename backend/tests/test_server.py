@@ -24,6 +24,9 @@ class ServerTest(unittest.TestCase):
 [paths]
 media_dir = "{media_root}"
 
+[tmdb]
+api_key_env = "__MEDIA_MANAGER_TEST_TMDB_KEY__"
+
 [[libraries]]
 name = "Movies"
 kind = "movie"
@@ -41,8 +44,33 @@ path = "{media_root / "movies"}"
             media = client.get("/api/media")
 
         self.assertEqual(health.status_code, 200)
+        self.assertEqual(health.json()["tmdb"], "missing")
         self.assertEqual(libraries.json()[0]["name"], "Movies")
         self.assertEqual(media.json()["items"][0]["title"], "Dune")
+
+    def test_health_reports_tmdb_configured_without_exposing_key(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config.toml"
+            config_path.write_text(
+                """
+[paths]
+media_dir = "/media"
+
+[tmdb]
+api_key = "test"
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
+            from media_manager.server import create_app
+
+            client = TestClient(create_app())
+            response = client.get("/api/health")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["tmdb"], "configured")
+        self.assertNotIn("test", str(response.json()))
 
     def test_error_response_is_structured(self) -> None:
         with TemporaryDirectory() as tmp:

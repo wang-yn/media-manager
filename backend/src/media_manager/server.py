@@ -39,9 +39,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return JSONResponse(exc.payload(), status_code=exc.status)
 
     @app.get("/api/health")
-    def health() -> dict[str, str]:
+    def health() -> dict[str, object]:
         cfg = _config(app)
-        return {"status": "ok", "config": str(cfg.path), "media_dir": str(cfg.media_dir)}
+        return {"status": "ok", "config": str(cfg.path), "media_dir": str(cfg.media_dir), "tmdb": "configured" if _tmdb_api_key(cfg) else "missing"}
 
     @app.get("/api/libraries")
     def libraries() -> list[dict[str, str]]:
@@ -128,11 +128,14 @@ def _find_media(app: FastAPI, media_id: str) -> MediaItem:
 
 
 def _tmdb(app: FastAPI) -> TMDBClient:
-    raw = _config(app).raw
+    return TMDBClient(_tmdb_api_key(_config(app)))
+
+
+def _tmdb_api_key(config: AppConfig) -> str:
+    raw = config.raw
     tmdb_config = raw.get("tmdb", {})
     api_key_env = str(tmdb_config.get("api_key_env", "TMDB_API_KEY"))
-    api_key = os.environ.get(api_key_env) or str(tmdb_config.get("api_key", ""))
-    return TMDBClient(api_key)
+    return os.environ.get(api_key_env) or str(tmdb_config.get("api_key", ""))
 
 
 def _library_dict(library: Any) -> dict[str, str]:

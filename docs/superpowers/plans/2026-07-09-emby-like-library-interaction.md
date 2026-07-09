@@ -630,7 +630,7 @@ Run:
 
 ```bash
 git diff --check
-rg -n 'REDACTED_TMDB_API_KEY|api_key\s*=\s*"[A-Za-z0-9]{20,}"' . -g '!frontend/node_modules/**' -g '!frontend/dist/**' -g '!.venv/**'
+rg -n 'api_key\s*=\s*"[A-Za-z0-9]{20,}"' . -g '!frontend/node_modules/**' -g '!frontend/dist/**' -g '!.venv/**'
 ```
 
 Expected: `git diff --check` 退出码 0；`rg` 无命中。

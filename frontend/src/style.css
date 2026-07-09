@@ -57,8 +57,30 @@ button:disabled {
   margin-bottom: 20px;
 }
 
+.brand-button {
+  display: grid;
+  gap: 4px;
+  width: auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.brand-title {
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.top-actions {
+  display: flex;
+  gap: 10px;
+}
+
 .eyebrow,
-h1,
 h2,
 p {
   margin: 0;
@@ -67,12 +89,6 @@ p {
 .eyebrow {
   color: #52616b;
   font-size: 13px;
-}
-
-h1 {
-  margin-top: 4px;
-  font-size: 28px;
-  font-weight: 700;
 }
 
 h2 {
@@ -93,7 +109,7 @@ h2 {
 
 .summary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
   margin-bottom: 16px;
 }
@@ -132,13 +148,6 @@ h2 {
   color: #a16207;
 }
 
-.layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
 .panel {
   min-width: 0;
   margin-bottom: 16px;
@@ -151,6 +160,56 @@ h2 {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
+}
+
+.library-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.library-card {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  min-height: 150px;
+  padding: 16px;
+  border-color: #d6dee1;
+  background: #fff;
+  color: inherit;
+  text-align: left;
+}
+
+.library-card:hover,
+.link-button:hover,
+.brand-button:hover {
+  border-color: #1f6f64;
+}
+
+.library-card span,
+.library-card small,
+.empty-state p {
+  color: #52616b;
+}
+
+.library-card strong {
+  font-size: 20px;
+}
+
+.empty-state {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  padding: 24px;
+  border: 1px solid #d6dee1;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.link-button {
+  border-color: #c9d4d8;
+  background: #fff;
+  color: #1f2933;
 }
 
 .table-wrap {
@@ -188,41 +247,6 @@ th {
   overflow-wrap: anywhere;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 13px;
-}
-
-.source-list {
-  display: grid;
-  gap: 8px;
-}
-
-.source {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 0;
-  border-top: 1px solid #e4eaed;
-}
-
-.source span {
-  display: block;
-  max-width: 260px;
-  overflow: hidden;
-  color: #52616b;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.source small {
-  flex: 0 0 auto;
-}
-
-.enabled {
-  color: #157347;
-}
-
-.disabled {
-  color: #6b7280;
 }
 
 .empty {
@@ -289,7 +313,6 @@ th {
 
 @media (max-width: 860px) {
   .summary,
-  .layout,
   .library-form {
     grid-template-columns: 1fr;
   }
@@ -299,7 +322,8 @@ th {
     flex-direction: column;
   }
 
-  button {
+  .top-actions {
     width: 100%;
+    flex-direction: column;
   }
 }
