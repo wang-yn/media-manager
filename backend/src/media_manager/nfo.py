@@ -47,7 +47,7 @@ def _write_episode(item: MediaItem, metadata: dict[str, object]) -> Path:
 def _basic_fields(root: ET.Element, metadata: dict[str, object], item: MediaItem) -> None:
     title = metadata.get("title") or metadata.get("name") or item.title
     original = metadata.get("original_title") or metadata.get("original_name")
-    year = item.year or _year(metadata)
+    year = _year(metadata) or item.year
     ET.SubElement(root, "title").text = str(title)
     if original:
         ET.SubElement(root, "originaltitle").text = str(original)

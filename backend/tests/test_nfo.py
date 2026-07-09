@@ -15,7 +15,7 @@ class NfoTest(unittest.TestCase):
             movie = Path(tmp) / "Dune (2021)" / "Dune (2021).mkv"
             movie.parent.mkdir()
             movie.write_text("", encoding="utf-8")
-            item = MediaItem("movie", "Dune", str(movie), "Movies", str(Path(tmp)), year=2021)
+            item = MediaItem("movie", "Dune", str(movie), "Movies", str(Path(tmp)), year=2020)
 
             nfo_path = write_nfo(
                 item,
@@ -32,6 +32,7 @@ class NfoTest(unittest.TestCase):
         self.assertEqual(nfo_path.name, "movie.nfo")
         self.assertEqual(root.tag, "movie")
         self.assertEqual(root.findtext("title"), "Dune")
+        self.assertEqual(root.findtext("year"), "2021")
         self.assertEqual(root.findtext("tmdbid"), "438631")
 
     def test_writes_series_and_episode_nfo(self) -> None:
