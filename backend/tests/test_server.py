@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 import os
 import unittest
 import warnings
@@ -115,6 +116,121 @@ api_key = "test"
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"]["code"], "invalid_library_path")
+
+    def test_health_reports_assrt_configured_without_exposing_token(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config.toml"
+            config_path.write_text(
+                """
+[paths]
+media_dir = "/media"
+
+[assrt]
+token = "test-assrt-token"
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
+            from media_manager.server import create_app
+
+            response = TestClient(create_app()).get("/api/health")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["assrt"], "configured")
+        self.assertNotIn("test-assrt-token", str(response.json()))
+
+    def test_search_subtitles_uses_video_stem_by_default(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            media_root = root / "media"
+            config_path = root / "config.toml"
+            movie = media_root / "movies" / "The Matrix" / "The.Matrix.1999.1080p.BluRay.x264-GROUP.mkv"
+            movie.parent.mkdir(parents=True)
+            movie.write_text("", encoding="utf-8")
+            config_path.write_text(
+                f"""
+[paths]
+media_dir = "{media_root}"
+
+[assrt]
+token = "token"
+
+[[libraries]]
+name = "Movies"
+kind = "movie"
+path = "{media_root / "movies"}"
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
+            from media_manager.server import create_app
+
+            client = TestClient(create_app())
+            media_id = client.get("/api/media").json()["items"][0]["id"]
+
+            class FakeAssrtClient:
+                def __init__(self, token):
+                    self.token = token
+
+                def search(self, query):
+                    self.__class__.query = query
+                    return [{"id": 123456, "native_name": "黑客帝国"}]
+
+            with patch("media_manager.server.AssrtClient", FakeAssrtClient):
+                response = client.post(f"/api/media/{media_id}/subtitles/search")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["results"][0]["id"], 123456)
+        self.assertEqual(FakeAssrtClient.query, "The.Matrix.1999.1080p.BluRay.x264-GROUP")
+
+    def test_download_subtitle_returns_written_path(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            media_root = root / "media"
+            config_path = root / "config.toml"
+            movie = media_root / "movies" / "The Matrix" / "The.Matrix.1999.mkv"
+            movie.parent.mkdir(parents=True)
+            movie.write_text("", encoding="utf-8")
+            config_path.write_text(
+                f"""
+[paths]
+media_dir = "{media_root}"
+
+[assrt]
+token = "token"
+
+[[libraries]]
+name = "Movies"
+kind = "movie"
+path = "{media_root / "movies"}"
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
+            from media_manager.server import create_app
+
+            client = TestClient(create_app())
+            media_id = client.get("/api/media").json()["items"][0]["id"]
+
+            class FakeAssrtClient:
+                def __init__(self, token):
+                    pass
+
+                def detail(self, subtitle_id):
+                    return {"filelist": [{"f": "movie.srt", "url": "https://file/sub.srt"}]}
+
+                def download(self, url):
+                    return b"subtitle"
+
+            with patch("media_manager.server.AssrtClient", FakeAssrtClient):
+                response = client.post(f"/api/media/{media_id}/subtitles/download", json={"subtitle_id": 123456})
+
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.json()["path"].endswith("The.Matrix.1999.zh.srt"))
+            self.assertEqual((movie.parent / "The.Matrix.1999.zh.srt").read_bytes(), b"subtitle")
 
 
 if __name__ == "__main__":

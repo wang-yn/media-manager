@@ -9,6 +9,9 @@ media_dir = "/media"
 [tmdb]
 api_key_env = "TMDB_API_KEY"
 
+[assrt]
+token_env = "ASSRT_API_TOKEN"
+
 [[libraries]]
 name = "Movies"
 kind = "movie"

@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 import uvicorn
 
+from .assrt import AssrtClient, download_subtitle, subtitle_query
 from .config import AppConfig, append_library, load_config
 from .errors import AppError
 from .media import MediaItem, scan_libraries
@@ -30,6 +31,14 @@ class MetadataApplyInput(BaseModel):
     tmdb_id: int
 
 
+class SubtitleSearchInput(BaseModel):
+    query: str | None = None
+
+
+class SubtitleDownloadInput(BaseModel):
+    subtitle_id: int
+
+
 def create_app(config: AppConfig | None = None) -> FastAPI:
     app = FastAPI(title="Media Manager")
     app.state.config = config or load_config()
@@ -41,7 +50,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     @app.get("/api/health")
     def health() -> dict[str, object]:
         cfg = _config(app)
-        return {"status": "ok", "config": str(cfg.path), "media_dir": str(cfg.media_dir), "tmdb": "configured" if _tmdb_api_key(cfg) else "missing"}
+        return {
+            "status": "ok",
+            "config": str(cfg.path),
+            "media_dir": str(cfg.media_dir),
+            "tmdb": "configured" if _tmdb_api_key(cfg) else "missing",
+            "assrt": "configured" if _assrt_token(cfg) else "missing",
+        }
 
     @app.get("/api/libraries")
     def libraries() -> list[dict[str, str]]:
@@ -90,6 +105,18 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     def rename_apply(media_id: str) -> dict[str, object]:
         return apply_rename(_find_media(app, media_id))
 
+    @app.post("/api/media/{media_id}/subtitles/search")
+    def subtitle_search(media_id: str, input: SubtitleSearchInput | None = None) -> dict[str, object]:
+        item = _find_media(app, media_id)
+        query = (input.query.strip() if input and input.query else "") or subtitle_query(item)
+        return {"query": query, "results": _assrt(app).search(query)}
+
+    @app.post("/api/media/{media_id}/subtitles/download")
+    def subtitle_download(media_id: str, input: SubtitleDownloadInput) -> dict[str, str]:
+        item = _find_media(app, media_id)
+        path = download_subtitle(item, input.subtitle_id, _assrt(app))
+        return {"path": str(path)}
+
     @app.get("/{path:path}")
     def static(path: str) -> Response:
         if not STATIC_DIR.exists():
@@ -131,11 +158,22 @@ def _tmdb(app: FastAPI) -> TMDBClient:
     return TMDBClient(_tmdb_api_key(_config(app)))
 
 
+def _assrt(app: FastAPI) -> AssrtClient:
+    return AssrtClient(_assrt_token(_config(app)))
+
+
 def _tmdb_api_key(config: AppConfig) -> str:
     raw = config.raw
     tmdb_config = raw.get("tmdb", {})
     api_key_env = str(tmdb_config.get("api_key_env", "TMDB_API_KEY"))
     return os.environ.get(api_key_env) or str(tmdb_config.get("api_key", ""))
+
+
+def _assrt_token(config: AppConfig) -> str:
+    raw = config.raw
+    assrt_config = raw.get("assrt", {})
+    token_env = str(assrt_config.get("token_env", "ASSRT_API_TOKEN"))
+    return os.environ.get(token_env) or str(assrt_config.get("token", ""))
 
 
 def _library_dict(library: Any) -> dict[str, str]:
