@@ -105,6 +105,10 @@ def _changes(item: MediaItem) -> list[RenameChange]:
     movie_nfo = video.parent / "movie.nfo"
     if item.kind == "movie" and movie_nfo.exists() and movie_nfo.parent != target_video.parent:
         changes.append({"from": str(movie_nfo), "to": str(target_video.parent / "movie.nfo")})
+    if item.kind == "series":
+        tvshow_nfo = _show_dir(item) / "tvshow.nfo"
+        if tvshow_nfo.exists() and tvshow_nfo.parent != target_video.parents[1]:
+            changes.append({"from": str(tvshow_nfo), "to": str(target_video.parents[1] / "tvshow.nfo")})
     return changes
 
 

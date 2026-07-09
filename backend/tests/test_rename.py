@@ -111,6 +111,7 @@ class RenameTest(unittest.TestCase):
 
         self.assertIn(root / "TV" / "Pantheon - 万神殿 (2022)" / "Season 01" / "Pantheon - 万神殿 - S01E03.mkv", targets)
         self.assertIn(root / "TV" / "Pantheon - 万神殿 (2022)" / "Season 01" / "Pantheon - 万神殿 - S01E03.nfo", targets)
+        self.assertIn(root / "TV" / "Pantheon - 万神殿 (2022)" / "tvshow.nfo", targets)
 
     def test_preview_does_not_duplicate_same_local_and_original_title(self) -> None:
         with TemporaryDirectory() as tmp:
