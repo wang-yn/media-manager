@@ -16,12 +16,12 @@ class AssrtClient:
         self.token = token or ""
         self.opener = opener or urlopen
 
-    def search(self, keyword: str, cnt: int = 20) -> list[dict[str, object]]:
+    def search(self, query: str, count: int = 10) -> list[dict[str, object]]:
         self._require_token()
-        keyword = keyword.strip()
-        if len(keyword) < 3:
+        query = query.strip()
+        if len(query) < 3:
             raise AppError("assrt_keyword_too_short", "ASSRT 搜索关键词太短")
-        payload = self._api_get("search", {"q": keyword, "cnt": cnt, "no_muxer": 1})
+        payload = self._api_get("search", {"q": query, "cnt": count, "no_muxer": 1})
         subs = self._subs(payload)
         return [self._candidate(item) for item in subs if isinstance(item, dict)]
 

@@ -51,11 +51,23 @@ class AssrtClientTest(unittest.TestCase):
         results = AssrtClient("token", opener=opener).search("The.Matrix.1999.1080p.BluRay.x264-GROUP")
 
         self.assertIn("/v1/sub/search?", str(seen["url"]))
+        self.assertIn("cnt=10", str(seen["url"]))
         self.assertIn("no_muxer=1", str(seen["url"]))
         self.assertEqual(seen["authorization"], "Bearer token")
         self.assertEqual(results[0]["id"], 123456)
         self.assertEqual(results[0]["native_name"], "黑客帝国/The Matrix")
         self.assertEqual(results[0]["lang"], "中英双语")
+
+    def test_search_accepts_count_keyword(self) -> None:
+        seen: dict[str, object] = {}
+
+        def opener(request, timeout=10):
+            seen["url"] = request.full_url
+            return FakeResponse(json.dumps({"status": 0, "sub": {"subs": []}}).encode())
+
+        AssrtClient("token", opener=opener).search("Matrix", count=5)
+
+        self.assertIn("cnt=5", str(seen["url"]))
 
     def test_short_keyword_is_rejected_before_request(self) -> None:
         def opener(request, timeout=10):
