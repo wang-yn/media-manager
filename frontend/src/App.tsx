@@ -853,6 +853,9 @@ function LibraryDetailView({
       ? visibleSeries.map((show) => ({ key: show.key, item: show.representative, items: show.items }))
       : visibleItems.map((item) => ({ key: item.id, item, items: [item] }));
   const selectedTargets = visibleTargets.filter((target) => selectedKeys.includes(target.key));
+  const canBatchMetadata = selectedTargets.some((target) => !target.item.has_metadata);
+  const canBatchSubtitles = selectedTargets.some((target) => target.items.some((item) => (item.subtitles ?? []).length === 0));
+  const canBatchRename = selectedTargets.some((target) => target.items.some((item) => item.rename_needed));
 
   function toggleIssueFilter(filter: IssueFilter) {
     setIssueFilters((current) => (current.includes(filter) ? current.filter((item) => item !== filter) : [...current, filter]));
@@ -900,13 +903,13 @@ function LibraryDetailView({
             <button type="button" className="link-button" onClick={() => setSelectedKeys([])} disabled={selectedKeys.length === 0}>
               清空选择
             </button>
-            <button type="button" onClick={() => onBatchMetadata(selectedTargets)} disabled={selectedTargets.length === 0}>
+            <button type="button" onClick={() => onBatchMetadata(selectedTargets)} disabled={!canBatchMetadata}>
               批量刮削
             </button>
-            <button type="button" onClick={() => onBatchSubtitles(selectedTargets)} disabled={selectedTargets.length === 0}>
+            <button type="button" onClick={() => onBatchSubtitles(selectedTargets)} disabled={!canBatchSubtitles}>
               批量字幕
             </button>
-            <button type="button" onClick={() => onBatchRename(selectedTargets)} disabled={selectedTargets.length === 0 || busy === "batch-rename-preview"}>
+            <button type="button" onClick={() => onBatchRename(selectedTargets)} disabled={!canBatchRename || busy === "batch-rename-preview"}>
               {busy === "batch-rename-preview" ? "生成预览中" : "批量重命名"}
             </button>
           </div>
