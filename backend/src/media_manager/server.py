@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 import os
+import shutil
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -12,9 +13,9 @@ import uvicorn
 from .assrt import AssrtClient, download_subtitle, subtitle_query
 from .config import AppConfig, append_library, load_config
 from .errors import AppError
-from .media import MediaItem, scan_libraries
+from .media import MediaItem, directory_files, scan_libraries
 from .nfo import write_nfo
-from .rename import apply_rename, preview_rename
+from .rename import apply_batch_rename, apply_rename, preview_rename
 from .tmdb import TMDBClient
 
 
@@ -110,6 +111,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     def rename_apply(media_id: str) -> dict[str, object]:
         return apply_rename(_find_media(app, media_id))
 
+    @app.post("/api/media/{media_id}/rename/batch")
+    def rename_batch(media_id: str) -> dict[str, object]:
+        item = _find_media(app, media_id)
+        return apply_batch_rename(_series_items(app, item))
+
     @app.post("/api/media/{media_id}/subtitles/search")
     def subtitle_search(media_id: str, input: SubtitleSearchInput | None = None) -> dict[str, object]:
         item = _find_media(app, media_id)
@@ -121,6 +127,21 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         item = _find_media(app, media_id)
         path = download_subtitle(item, input.subtitle_id, _assrt(app))
         return {"path": str(path)}
+
+    @app.get("/api/media/{media_id}/files")
+    def media_files(media_id: str) -> dict[str, object]:
+        root = _item_directory(_find_media(app, media_id))
+        files = directory_files(root)
+        return {"root_path": str(root), "total_size_bytes": sum(int(file["size_bytes"]) for file in files), "files": files}
+
+    @app.delete("/api/media/{media_id}")
+    def delete_media(media_id: str) -> dict[str, str]:
+        path = _series_directory(_find_media(app, media_id))
+        try:
+            shutil.rmtree(path)
+        except OSError as exc:
+            raise AppError("delete_failed", "删除剧集目录失败", str(exc), str(path), status=500) from exc
+        return {"deleted_path": str(path)}
 
     @app.get("/{path:path}")
     def static(path: str) -> Response:
@@ -157,6 +178,38 @@ def _find_media(app: FastAPI, media_id: str) -> MediaItem:
         if item.id == media_id:
             return item
     raise AppError("media_not_found", "媒体条目不存在或已经移动", media_id, status=404)
+
+
+def _item_directory(item: MediaItem) -> Path:
+    if item.kind == "series":
+        return _series_directory(item)
+    library_root = Path(item.library_path).resolve()
+    directory = Path(item.path).resolve().parent
+    if not directory.is_relative_to(library_root) or not directory.is_dir():
+        raise AppError("invalid_file_list_target", "无法读取媒体目录", str(library_root), item.path)
+    return directory
+
+
+def _series_items(app: FastAPI, item: MediaItem) -> list[MediaItem]:
+    root = _series_directory(item).resolve()
+    return [candidate for candidate in _scan(app) if candidate.kind == "series" and _series_directory(candidate).resolve() == root]
+
+
+def _series_directory(item: MediaItem) -> Path:
+    if item.kind != "series":
+        raise AppError("unsupported_delete_target", "当前只支持删除剧集目录", item.kind)
+    library_root = Path(item.library_path).resolve()
+    video = Path(item.path).resolve()
+    try:
+        relative = video.relative_to(library_root)
+    except ValueError as exc:
+        raise AppError("invalid_delete_target", "媒体文件不在媒体库目录内", str(library_root), item.path) from exc
+    if len(relative.parts) < 2:
+        raise AppError("invalid_delete_target", "无法识别剧集目录", item.path)
+    show_dir = (library_root / relative.parts[0]).resolve()
+    if show_dir == library_root or not show_dir.is_relative_to(library_root) or not show_dir.is_dir():
+        raise AppError("invalid_delete_target", "无法识别剧集目录", item.path)
+    return show_dir
 
 
 def _tmdb(app: FastAPI) -> TMDBClient:

@@ -280,6 +280,179 @@ path = "{media_root / "movies"}"
             self.assertTrue(response.json()["path"].endswith("The.Matrix.1999.zh.srt"))
             self.assertEqual((movie.parent / "The.Matrix.1999.zh.srt").read_bytes(), b"subtitle")
 
+    def test_delete_series_removes_show_directory(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            media_root = root / "media"
+            config_path = root / "config.toml"
+            show = media_root / "tv" / "Pantheon (2022)"
+            episode = show / "Season 01" / "Pantheon - S01E03.mkv"
+            episode.parent.mkdir(parents=True)
+            episode.write_text("", encoding="utf-8")
+            config_path.write_text(
+                f"""
+[paths]
+media_dir = "{media_root}"
+
+[[libraries]]
+name = "TV"
+kind = "series"
+path = "{media_root / "tv"}"
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
+            from media_manager.server import create_app
+
+            client = TestClient(create_app())
+            media_id = client.get("/api/media").json()["items"][0]["id"]
+            response = client.delete(f"/api/media/{media_id}")
+            count_after_delete = client.get("/api/media").json()["count"]
+            show_exists = show.exists()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["deleted_path"], str(show))
+        self.assertFalse(show_exists)
+        self.assertEqual(count_after_delete, 0)
+
+    def test_delete_rejects_movie_item(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            media_root = root / "media"
+            config_path = root / "config.toml"
+            movie_dir = media_root / "movies" / "Dune (2021)"
+            movie = movie_dir / "Dune (2021).mkv"
+            movie.parent.mkdir(parents=True)
+            movie.write_text("", encoding="utf-8")
+            config_path.write_text(
+                f"""
+[paths]
+media_dir = "{media_root}"
+
+[[libraries]]
+name = "Movies"
+kind = "movie"
+path = "{media_root / "movies"}"
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
+            from media_manager.server import create_app
+
+            client = TestClient(create_app())
+            media_id = client.get("/api/media").json()["items"][0]["id"]
+            response = client.delete(f"/api/media/{media_id}")
+            movie_dir_exists = movie_dir.exists()
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "unsupported_delete_target")
+        self.assertTrue(movie_dir_exists)
+
+    def test_media_files_lists_directory_files_recursively(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            media_root = root / "media"
+            config_path = root / "config.toml"
+            season = media_root / "tv" / "Pantheon (2022)" / "Season 01"
+            episode = season / "Pantheon - S01E03.mkv"
+            note = season / "extras" / "note.txt"
+            show_nfo = season.parent / "tvshow.nfo"
+            thumb = season / ".@__thumb" / "cached.jpg"
+            note.parent.mkdir(parents=True)
+            thumb.parent.mkdir()
+            episode.write_bytes(b"video")
+            note.write_bytes(b"note")
+            thumb.write_bytes(b"ignored")
+            show_nfo.write_text("<tvshow />", encoding="utf-8")
+            config_path.write_text(
+                f"""
+[paths]
+media_dir = "{media_root}"
+
+[[libraries]]
+name = "TV"
+kind = "series"
+path = "{media_root / "tv"}"
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
+            from media_manager.server import create_app
+
+            client = TestClient(create_app())
+            item = client.get("/api/media").json()["items"][0]
+            response = client.get(f"/api/media/{item['id']}/files")
+
+        self.assertEqual(item["directory_size_bytes"], 19)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["root_path"], str(season.parent))
+        self.assertEqual(response.json()["total_size_bytes"], 19)
+        self.assertEqual(
+            response.json()["files"],
+            [
+                {"path": "Season 01/Pantheon - S01E03.mkv", "size_bytes": 5},
+                {"path": "Season 01/extras/note.txt", "size_bytes": 4},
+                {"path": "tvshow.nfo", "size_bytes": 10},
+            ],
+        )
+
+    def test_batch_rename_series_renames_all_episodes(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            media_root = root / "media"
+            config_path = root / "config.toml"
+            show = media_root / "tv" / "Pantheon (2022)"
+            first = show / "Season 01" / "Pantheon - S01E03.mkv"
+            second = show / "Season 02" / "Pantheon - S02E01.mp4"
+            tvshow_nfo = show / "tvshow.nfo"
+            first.parent.mkdir(parents=True)
+            second.parent.mkdir(parents=True)
+            first.write_text("", encoding="utf-8")
+            second.write_text("", encoding="utf-8")
+            tvshow_nfo.write_text(
+                """
+<tvshow>
+  <title>万神殿</title>
+  <originaltitle>Pantheon</originaltitle>
+  <year>2022</year>
+</tvshow>
+""".strip(),
+                encoding="utf-8",
+            )
+            config_path.write_text(
+                f"""
+[paths]
+media_dir = "{media_root}"
+
+[[libraries]]
+name = "TV"
+kind = "series"
+path = "{media_root / "tv"}"
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
+            from media_manager.server import create_app
+
+            client = TestClient(create_app())
+            media_id = client.get("/api/media").json()["items"][0]["id"]
+            response = client.post(f"/api/media/{media_id}/rename/batch")
+
+            renamed_show = media_root / "tv" / "Pantheon - 万神殿 (2022)"
+            first_exists = (renamed_show / "Season 01" / "Pantheon - 万神殿 - S01E03.mkv").exists()
+            second_exists = (renamed_show / "Season 02" / "Pantheon - 万神殿 - S02E01.mp4").exists()
+            nfo_exists = (renamed_show / "tvshow.nfo").exists()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(first_exists)
+        self.assertTrue(second_exists)
+        self.assertTrue(nfo_exists)
+        self.assertGreaterEqual(len(response.json()["changes"]), 3)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -266,6 +266,11 @@ th {
   min-width: 86px;
 }
 
+.danger-button {
+  border-color: #b91c1c;
+  background: #b91c1c;
+}
+
 .subtitle-tags {
   display: flex;
   flex-wrap: wrap;

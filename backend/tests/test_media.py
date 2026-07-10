@@ -80,6 +80,24 @@ class ScanLibrariesTest(unittest.TestCase):
 
         self.assertEqual(items[0].subtitles, [str(subtitle)])
 
+    def test_reports_media_directory_size(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            movie = root / "movies" / "Dune (2021)" / "Dune (2021).mkv"
+            poster = movie.parent / "poster.jpg"
+            thumb = movie.parent / ".@__thumb" / "cached.mkv"
+            movie.parent.mkdir(parents=True)
+            thumb.parent.mkdir()
+            movie.write_bytes(b"video")
+            poster.write_bytes(b"poster")
+            thumb.write_bytes(b"ignored")
+
+            items = scan_libraries([Library("Movies", "movie", root / "movies")])
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].directory_size_bytes, 11)
+        self.assertEqual(items[0].to_dict()["directory_size_bytes"], 11)
+
     def test_cleans_common_movie_release_names(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

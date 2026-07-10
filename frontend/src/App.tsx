@@ -27,6 +27,7 @@ type MediaItem = {
   subtitles?: string[];
   nfo_path?: string;
   has_nfo?: boolean;
+  directory_size_bytes?: number;
 };
 
 type MediaResponse = {
@@ -75,6 +76,19 @@ type RenameDialog = {
   error?: string;
 };
 
+type FilesDialog = {
+  item: MediaItem;
+  rootPath?: string;
+  totalSizeBytes?: number;
+  files?: MediaFile[];
+  error?: string;
+};
+
+type MediaFile = {
+  path: string;
+  size_bytes: number;
+};
+
 type RenamePreview = {
   can_apply: boolean;
   conflicts: string[];
@@ -101,16 +115,17 @@ type LibrarySummary = Library & {
   errors: number;
 };
 
-type SeasonSummary = {
+type SeriesSummary = {
   key: string;
   title: string;
   year?: number;
-  season: number;
+  seasons: number[];
   items: MediaItem[];
   representative: MediaItem;
   path: string;
   subtitles: string[];
   missingNfo: number;
+  directorySizeBytes: number;
 };
 
 export default function App() {
@@ -122,6 +137,7 @@ export default function App() {
   const [renameDialog, setRenameDialog] = useState<RenameDialog | null>(null);
   const [metadataDialog, setMetadataDialog] = useState<MetadataDialog | null>(null);
   const [subtitleDialog, setSubtitleDialog] = useState<SubtitleDialog | null>(null);
+  const [filesDialog, setFilesDialog] = useState<FilesDialog | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const metadataSearchId = useRef(0);
@@ -305,6 +321,59 @@ export default function App() {
     }
   }
 
+  async function deleteSeries(item: MediaItem) {
+    const path = seriesDirectoryPath(item);
+    if (!window.confirm(`确定删除剧集目录 ${relativeLibraryPath(path, item.library_path)}？此操作会删除目录下所有文件。`)) {
+      return;
+    }
+    const busyKey = `delete:${item.id}`;
+    setBusy(busyKey);
+    setError(null);
+    try {
+      await request<{ deleted_path: string }>(`/api/media/${item.id}`, { method: "DELETE" });
+      await refreshContent();
+    } catch (err) {
+      setError(messageFrom(err));
+    } finally {
+      setBusy((current) => (current === busyKey ? null : current));
+    }
+  }
+
+  async function openFilesDialog(item: MediaItem) {
+    const busyKey = `files:${item.id}`;
+    setFilesDialog({ item });
+    setBusy(busyKey);
+    setError(null);
+    try {
+      const result = await request<{ root_path: string; total_size_bytes: number; files: MediaFile[] }>(`/api/media/${item.id}/files`);
+      setFilesDialog((current) =>
+        current?.item.id === item.id ? { ...current, rootPath: result.root_path, totalSizeBytes: result.total_size_bytes, files: result.files, error: undefined } : current,
+      );
+    } catch (err) {
+      setFilesDialog((current) => (current?.item.id === item.id ? { ...current, error: messageFrom(err) } : current));
+    } finally {
+      setBusy((current) => (current === busyKey ? null : current));
+    }
+  }
+
+  async function batchRenameSeries(item: MediaItem) {
+    const path = seriesDirectoryPath(item);
+    if (!window.confirm(`确定批量重命名 ${relativeLibraryPath(path, item.library_path)} 下的所有分集？`)) {
+      return;
+    }
+    const busyKey = `batch-rename:${item.id}`;
+    setBusy(busyKey);
+    setError(null);
+    try {
+      await request<{ changes: Array<{ from: string; to: string }> }>(`/api/media/${item.id}/rename/batch`, { method: "POST" });
+      await refreshContent();
+    } catch (err) {
+      setError(messageFrom(err));
+    } finally {
+      setBusy((current) => (current === busyKey ? null : current));
+    }
+  }
+
   useEffect(() => {
     refresh();
   }, []);
@@ -359,6 +428,9 @@ export default function App() {
           onSearch={openMetadataDialog}
           onRename={openRenameDialog}
           onSearchSubtitle={openSubtitleDialog}
+          onDeleteSeries={deleteSeries}
+          onShowFiles={openFilesDialog}
+          onBatchRenameSeries={batchRenameSeries}
         />
       ) : null}
 
@@ -389,6 +461,8 @@ export default function App() {
           onClose={() => setSubtitleDialog(null)}
         />
       ) : null}
+
+      {filesDialog ? <FilesDialogView dialog={filesDialog} busy={busy} onClose={() => setFilesDialog(null)} /> : null}
     </main>
   );
 }
@@ -509,6 +583,9 @@ function LibraryDetailView({
   onSearch,
   onRename,
   onSearchSubtitle,
+  onDeleteSeries,
+  onShowFiles,
+  onBatchRenameSeries,
 }: {
   library?: LibrarySummary;
   items: MediaItem[];
@@ -516,8 +593,11 @@ function LibraryDetailView({
   onSearch: (item: MediaItem) => void;
   onRename: (item: MediaItem) => void;
   onSearchSubtitle: (item: MediaItem) => void;
+  onDeleteSeries: (item: MediaItem) => void;
+  onShowFiles: (item: MediaItem) => void;
+  onBatchRenameSeries: (item: MediaItem) => void;
 }) {
-  const [selectedSeasonKey, setSelectedSeasonKey] = useState<string | null>(null);
+  const [selectedSeriesKey, setSelectedSeriesKey] = useState<string | null>(null);
 
   if (!library) {
     return (
@@ -531,52 +611,62 @@ function LibraryDetailView({
     );
   }
 
-  const seasons = library.kind === "series" ? groupSeriesSeasons(items) : [];
-  const selectedSeason = seasons.find((season) => season.key === selectedSeasonKey);
+  const series = library.kind === "series" ? groupSeriesShows(items) : [];
+  const selectedSeries = series.find((show) => show.key === selectedSeriesKey);
 
   return (
     <section className="panel">
       <div className="section-head">
         <div>
-          <h2>{selectedSeason ? `${mediaTitle(selectedSeason)} / 第 ${pad(selectedSeason.season)} 季` : library.name}</h2>
-          <p className="path">{selectedSeason ? relativeLibraryPath(selectedSeason.path, library.path) : library.path}</p>
+          <h2>{selectedSeries ? mediaTitle(selectedSeries) : library.name}</h2>
+          <p className="path">{selectedSeries ? relativeLibraryPath(selectedSeries.path, library.path) : library.path}</p>
         </div>
-        {selectedSeason ? (
-          <button type="button" className="link-button" onClick={() => setSelectedSeasonKey(null)}>
-            返回季列表
-          </button>
+        {selectedSeries ? (
+          <div className="top-actions">
+            <button type="button" onClick={() => onBatchRenameSeries(selectedSeries.representative)} disabled={busy === `batch-rename:${selectedSeries.representative.id}`}>
+              {busy === `batch-rename:${selectedSeries.representative.id}` ? "重命名中" : "批量重命名"}
+            </button>
+            <button type="button" className="link-button" onClick={() => setSelectedSeriesKey(null)}>
+              返回剧集列表
+            </button>
+          </div>
         ) : (
           <button type="button" className="link-button" onClick={() => setHash({ name: "home" })}>
             返回媒体库
           </button>
         )}
       </div>
-      {library.kind === "series" && !selectedSeason ? (
-        <SeasonTable seasons={seasons} busy={busy} onSearch={onSearch} onOpen={setSelectedSeasonKey} />
+      {library.kind === "series" && !selectedSeries ? (
+        <SeriesTable series={series} busy={busy} onSearch={onSearch} onOpen={setSelectedSeriesKey} onDelete={onDeleteSeries} onShowFiles={onShowFiles} />
       ) : (
         <MediaTable
-          items={selectedSeason ? selectedSeason.items : items}
+          items={selectedSeries ? selectedSeries.items : items}
           busy={busy}
           showMetadata={library.kind !== "series"}
           onSearch={onSearch}
           onRename={onRename}
           onSearchSubtitle={onSearchSubtitle}
+          onShowFiles={onShowFiles}
         />
       )}
     </section>
   );
 }
 
-function SeasonTable({
-  seasons,
+function SeriesTable({
+  series,
   busy,
   onSearch,
   onOpen,
+  onDelete,
+  onShowFiles,
 }: {
-  seasons: SeasonSummary[];
+  series: SeriesSummary[];
   busy: string | null;
   onSearch: (item: MediaItem) => void;
   onOpen: (key: string) => void;
+  onDelete: (item: MediaItem) => void;
+  onShowFiles: (item: MediaItem) => void;
 }) {
   return (
     <div className="table-wrap">
@@ -584,40 +674,50 @@ function SeasonTable({
         <thead>
           <tr>
             <th>剧集</th>
-            <th>季</th>
+            <th>季数</th>
             <th>集数</th>
             <th>NFO</th>
             <th>字幕</th>
+            <th>大小</th>
             <th>路径</th>
             <th>操作</th>
           </tr>
         </thead>
         <tbody>
-          {seasons.map((season) => (
-            <tr key={season.key}>
-              <td>{mediaTitle(season)}</td>
-              <td>第 {pad(season.season)} 季</td>
-              <td>{season.items.length}</td>
-              <td className={season.missingNfo === 0 ? "good" : "warn"}>{seasonNfoLabel(season)}</td>
+          {series.map((show) => (
+            <tr key={show.key}>
+              <td>{mediaTitle(show)}</td>
+              <td>{seasonCountLabel(show)}</td>
+              <td>{show.items.length}</td>
+              <td className={show.missingNfo === 0 ? "good" : "warn"}>{nfoLabel(show)}</td>
               <td>
-                <SubtitleTags subtitles={season.subtitles} />
+                <SubtitleTags subtitles={show.subtitles} />
               </td>
-              <td className="path">{relativeLibraryPath(season.path, season.representative.library_path)}</td>
+              <td>
+                <DirectorySizeTag size={show.directorySizeBytes} />
+              </td>
+              <td className="path">{relativeLibraryPath(show.path, show.representative.library_path)}</td>
               <td>
                 <div className="actions">
-                  <button type="button" onClick={() => onSearch(season.representative)} disabled={busy === `metadata-search:${season.representative.id}`}>
+                  <button type="button" onClick={() => onSearch(show.representative)} disabled={busy === `metadata-search:${show.representative.id}`}>
                     刮削
                   </button>
-                  <button type="button" onClick={() => onOpen(season.key)}>
-                    查看分集
+                  <button type="button" onClick={() => onOpen(show.key)}>
+                    查看详情
+                  </button>
+                  <button type="button" onClick={() => onShowFiles(show.representative)} disabled={busy === `files:${show.representative.id}`}>
+                    详细文件
+                  </button>
+                  <button type="button" className="danger-button" onClick={() => onDelete(show.representative)} disabled={busy === `delete:${show.representative.id}`}>
+                    {busy === `delete:${show.representative.id}` ? "删除中" : "删除"}
                   </button>
                 </div>
               </td>
             </tr>
           ))}
-          {seasons.length === 0 ? (
+          {series.length === 0 ? (
             <tr>
-              <td colSpan={7} className="empty">
+              <td colSpan={8} className="empty">
                 未发现视频
               </td>
             </tr>
@@ -635,6 +735,7 @@ function MediaTable({
   onSearch,
   onRename,
   onSearchSubtitle,
+  onShowFiles,
 }: {
   items: MediaItem[];
   busy: string | null;
@@ -642,6 +743,7 @@ function MediaTable({
   onSearch: (item: MediaItem) => void;
   onRename: (item: MediaItem) => void;
   onSearchSubtitle: (item: MediaItem) => void;
+  onShowFiles: (item: MediaItem) => void;
 }) {
   return (
     <div className="table-wrap">
@@ -653,6 +755,7 @@ function MediaTable({
             <th>季/集</th>
             <th>NFO</th>
             <th>字幕</th>
+            <th>大小</th>
             <th>路径</th>
             <th>操作</th>
           </tr>
@@ -667,11 +770,12 @@ function MediaTable({
               onSearch={() => onSearch(item)}
               onRename={() => onRename(item)}
               onSearchSubtitle={() => onSearchSubtitle(item)}
+              onShowFiles={() => onShowFiles(item)}
             />
           ))}
           {items.length === 0 ? (
             <tr>
-              <td colSpan={7} className="empty">
+              <td colSpan={8} className="empty">
                 未发现视频
               </td>
             </tr>
@@ -689,6 +793,7 @@ function Row({
   onSearch,
   onRename,
   onSearchSubtitle,
+  onShowFiles,
 }: {
   item: MediaItem;
   busy: string | null;
@@ -696,6 +801,7 @@ function Row({
   onSearch: () => void;
   onRename: () => void;
   onSearchSubtitle: () => void;
+  onShowFiles: () => void;
 }) {
   return (
     <tr>
@@ -705,6 +811,9 @@ function Row({
       <td className={item.has_nfo ? "good" : "warn"}>{item.has_nfo ? "已有" : "缺失"}</td>
       <td>
         <SubtitleTags subtitles={item.subtitles ?? []} />
+      </td>
+      <td>
+        <DirectorySizeTag size={item.directory_size_bytes ?? 0} />
       </td>
       <td className="path">{relativeLibraryPath(item.path, item.library_path)}</td>
       <td>
@@ -719,6 +828,9 @@ function Row({
           </button>
           <button type="button" onClick={onSearchSubtitle} disabled={busy === `subtitle-search:${item.id}`}>
             字幕
+          </button>
+          <button type="button" onClick={onShowFiles} disabled={busy === `files:${item.id}`}>
+            详细文件
           </button>
         </div>
       </td>
@@ -743,6 +855,14 @@ function SubtitleTags({ subtitles }: { subtitles: string[] }) {
           {language}
         </span>
       ))}
+    </div>
+  );
+}
+
+function DirectorySizeTag({ size }: { size: number }) {
+  return (
+    <div className="subtitle-tags">
+      <span className="subtitle-tag">{formatBytes(size)}</span>
     </div>
   );
 }
@@ -820,6 +940,56 @@ function RenameChangePreview({ change, libraryPath }: { change: { from: string; 
       <p className="rename-path path">
         {relativeLibraryPath(change.from, libraryPath)} → {relativeLibraryPath(change.to, libraryPath)}
       </p>
+    </div>
+  );
+}
+
+function FilesDialogView({ dialog, busy, onClose }: { dialog: FilesDialog; busy: string | null; onClose: () => void }) {
+  const loading = busy === `files:${dialog.item.id}`;
+  const files = dialog.files ?? [];
+  return (
+    <div className="dialog-backdrop">
+      <section className="dialog" role="dialog" aria-modal="true" aria-label="详细文件">
+        <button type="button" className="dialog-close" onClick={onClose} aria-label="关闭">
+          X
+        </button>
+        <div className="section-head">
+          <div>
+            <h2>详细文件</h2>
+            <p className="path">{dialog.rootPath ? relativeLibraryPath(dialog.rootPath, dialog.item.library_path) : relativeLibraryPath(dialog.item.path, dialog.item.library_path)}</p>
+          </div>
+          {dialog.totalSizeBytes !== undefined ? <DirectorySizeTag size={dialog.totalSizeBytes} /> : null}
+        </div>
+        {loading ? <p className="empty">正在读取文件...</p> : null}
+        {dialog.error ? <p className="notice error">{dialog.error}</p> : null}
+        {files.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>文件</th>
+                  <th>大小</th>
+                </tr>
+              </thead>
+              <tbody>
+                {files.map((file) => (
+                  <tr key={file.path}>
+                    <td className="path">{file.path}</td>
+                    <td>{formatBytes(file.size_bytes)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : !loading ? (
+          <p className="empty">目录下没有文件</p>
+        ) : null}
+        <div className="dialog-actions">
+          <button type="button" className="link-button" onClick={onClose}>
+            取消
+          </button>
+        </div>
+      </section>
     </div>
   );
 }
@@ -989,6 +1159,23 @@ function pad(value: number) {
   return String(value).padStart(2, "0");
 }
 
+function formatBytes(bytes: number) {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024;
+  let unit = units[0];
+  for (const nextUnit of units.slice(1)) {
+    if (value < 1024) {
+      break;
+    }
+    value /= 1024;
+    unit = nextUnit;
+  }
+  return `${value >= 10 ? value.toFixed(1) : value.toFixed(2)} ${unit}`;
+}
+
 function videoStem(path: string) {
   const name = baseName(path);
   const dot = name.lastIndexOf(".");
@@ -1026,45 +1213,62 @@ function renderDiffText(part: { prefix: string; diff: string; suffix: string }) 
   );
 }
 
-function groupSeriesSeasons(items: MediaItem[]) {
-  const seasons = new Map<string, SeasonSummary>();
+function groupSeriesShows(items: MediaItem[]) {
+  const shows = new Map<string, SeriesSummary>();
   for (const item of items) {
     const seasonNumber = item.season ?? 1;
-    const key = [item.title, item.year ?? "", seasonNumber].join("\u0000");
-    const current = seasons.get(key);
+    const showPath = seriesDirectoryPath(item);
+    const key = [item.title, item.year ?? "", showPath].join("\u0000");
+    const current = shows.get(key);
     if (current) {
       current.items.push(item);
+      if (!current.seasons.includes(seasonNumber)) {
+        current.seasons.push(seasonNumber);
+      }
       current.subtitles.push(...(item.subtitles ?? []));
       current.missingNfo += item.has_nfo ? 0 : 1;
       continue;
     }
-    seasons.set(key, {
+    shows.set(key, {
       key,
       title: item.title,
       year: item.year,
-      season: seasonNumber,
+      seasons: [seasonNumber],
       items: [item],
       representative: item,
-      path: dirname(item.path),
+      path: showPath,
       subtitles: [...(item.subtitles ?? [])],
       missingNfo: item.has_nfo ? 0 : 1,
+      directorySizeBytes: item.directory_size_bytes ?? 0,
     });
   }
-  return [...seasons.values()].sort((left, right) => mediaTitle(left).localeCompare(mediaTitle(right), "zh-CN") || left.season - right.season);
+  const result = [...shows.values()];
+  for (const show of result) {
+    show.seasons.sort((left, right) => left - right);
+    show.items.sort((left, right) => (left.season ?? 0) - (right.season ?? 0) || (left.episode ?? 0) - (right.episode ?? 0) || left.path.localeCompare(right.path));
+  }
+  return result.sort((left, right) => mediaTitle(left).localeCompare(mediaTitle(right), "zh-CN"));
 }
 
 function mediaTitle(item: Pick<MediaItem, "title" | "year">) {
   return item.year ? `${item.title} (${item.year})` : item.title;
 }
 
-function seasonNfoLabel(season: SeasonSummary) {
-  if (season.missingNfo === 0) {
+function nfoLabel(summary: Pick<SeriesSummary, "items" | "missingNfo">) {
+  if (summary.missingNfo === 0) {
     return "已有";
   }
-  if (season.missingNfo === season.items.length) {
+  if (summary.missingNfo === summary.items.length) {
     return "缺失";
   }
-  return `${season.items.length - season.missingNfo}/${season.items.length}`;
+  return `${summary.items.length - summary.missingNfo}/${summary.items.length}`;
+}
+
+function seasonCountLabel(show: Pick<SeriesSummary, "seasons">) {
+  if (show.seasons.length === 1) {
+    return `第 ${pad(show.seasons[0])} 季`;
+  }
+  return `${show.seasons.length} 季`;
 }
 
 function dirname(path: string) {
@@ -1111,6 +1315,12 @@ function relativeLibraryPath(path: string, libraryPath: string) {
   }
   const prefix = `${normalizedRoot}/`;
   return normalizedPath.startsWith(prefix) ? normalizedPath.slice(prefix.length) : path;
+}
+
+function seriesDirectoryPath(item: MediaItem) {
+  const relative = relativeLibraryPath(item.path, item.library_path).replaceAll("\\", "/");
+  const showDirectory = relative.split("/")[0];
+  return `${item.library_path.replace(/[/\\]+$/, "")}/${showDirectory}`;
 }
 
 function renameChanges(preview: RenamePreview) {

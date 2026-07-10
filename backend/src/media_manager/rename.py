@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TypedDict
 import xml.etree.ElementTree as ET
@@ -56,10 +57,40 @@ def _with_year(name: str, year: int | None) -> str:
 
 
 def preview_rename(item: MediaItem) -> RenamePreview:
-    changes = _changes(item)
+    return _preview_changes(_changes(item), Path(item.library_path))
+
+
+def apply_rename(item: MediaItem) -> RenameApplyResult:
+    preview = preview_rename(item)
+    if not preview["can_apply"]:
+        raise AppError("rename_conflict", "重命名存在冲突", ", ".join(preview["conflicts"]), item.path)
+    changes = list(preview["changes"])
+    _apply_changes(changes, [Path(item.path).parent], Path(item.library_path), item.path)
+    return {"changes": changes}
+
+
+def preview_batch_rename(items: list[MediaItem]) -> RenamePreview:
+    if not items:
+        return {"can_apply": True, "conflicts": [], "changes": []}
+    return _preview_changes(_dedupe_changes(change for item in items for change in _changes(item)), Path(items[0].library_path))
+
+
+def apply_batch_rename(items: list[MediaItem]) -> RenameApplyResult:
+    if not items:
+        return {"changes": []}
+    preview = preview_batch_rename(items)
+    if not preview["can_apply"]:
+        detail = ", ".join(preview["conflicts"])
+        raise AppError("rename_conflict", "批量重命名存在冲突", detail, items[0].path if items else None)
+    changes = list(preview["changes"])
+    _apply_changes(changes, [Path(item.path).parent for item in items], Path(items[0].library_path), items[0].path if items else "")
+    return {"changes": changes}
+
+
+def _preview_changes(changes: list[RenameChange], library: Path) -> RenamePreview:
     conflicts: list[str] = []
     targets: set[Path] = set()
-    library = Path(item.library_path).resolve()
+    library = library.resolve()
     for change in changes:
         target = Path(change["to"]).resolve()
         if not target.is_relative_to(library):
@@ -73,11 +104,7 @@ def preview_rename(item: MediaItem) -> RenamePreview:
     return {"can_apply": not conflicts, "conflicts": conflicts, "changes": changes}
 
 
-def apply_rename(item: MediaItem) -> RenameApplyResult:
-    preview = preview_rename(item)
-    if not preview["can_apply"]:
-        raise AppError("rename_conflict", "重命名存在冲突", ", ".join(preview["conflicts"]), item.path)
-    changes = list(preview["changes"])
+def _apply_changes(changes: list[RenameChange], cleanup_starts: list[Path], library: Path, error_path: str) -> None:
     try:
         for change in changes:
             source = Path(change["from"])
@@ -85,10 +112,22 @@ def apply_rename(item: MediaItem) -> RenameApplyResult:
             target.parent.mkdir(parents=True, exist_ok=True)
             if source.exists():
                 source.rename(target)
-        _cleanup_empty_dirs(Path(item.path).parent, Path(item.library_path))
+        for start in sorted(set(cleanup_starts), key=lambda path: len(path.parts), reverse=True):
+            _cleanup_empty_dirs(start, library)
     except OSError as exc:
-        raise AppError("rename_failed", "重命名失败", str(exc), item.path) from exc
-    return {"changes": changes}
+        raise AppError("rename_failed", "重命名失败", str(exc), error_path) from exc
+
+
+def _dedupe_changes(changes: Iterable[RenameChange]) -> list[RenameChange]:
+    result: list[RenameChange] = []
+    seen: set[tuple[str, str]] = set()
+    for change in changes:
+        key = (change["from"], change["to"])
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(change)
+    return result
 
 
 def _changes(item: MediaItem) -> list[RenameChange]:

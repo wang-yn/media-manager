@@ -3,11 +3,13 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from hashlib import sha1
 from pathlib import Path
+import os
 import re
 
 
 VIDEO_EXTENSIONS = {".mkv", ".mp4", ".avi", ".mov", ".wmv", ".m4v", ".ts"}
 SUBTITLE_EXTENSIONS = {".srt", ".ass", ".ssa"}
+IGNORED_DIRS = {".@__thumb"}
 EPISODE_RE = re.compile(r"[Ss](?P<season>\d{1,2})[ ._-]?[Ee](?P<episode>\d{1,3})")
 SEASON_DIR_RE = re.compile(r"(?:season|s)[ ._-]?(?P<season>\d{1,2})", re.IGNORECASE)
 YEAR_RE = re.compile(r"(?:^|[ ._\-(])(?P<year>19\d{2}|20\d{2})(?:$|[ ._\-)])")
@@ -41,6 +43,7 @@ class MediaItem:
     subtitles: list[str] | None = None
     nfo_path: str | None = None
     has_nfo: bool = False
+    directory_size_bytes: int = 0
     id: str = ""
 
     def __post_init__(self) -> None:
@@ -72,7 +75,7 @@ def scan_libraries(libraries: list[object]) -> list[MediaItem]:
 
 
 def _video_files(root: Path) -> list[Path]:
-    return [path for path in root.rglob("*") if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS]
+    return [path for path in _walk_files(root) if path.suffix.lower() in VIDEO_EXTENSIONS]
 
 
 def _movie_item(root: Path, video: Path, library_name: str) -> MediaItem:
@@ -85,12 +88,14 @@ def _movie_item(root: Path, video: Path, library_name: str) -> MediaItem:
         library=library_name,
         library_path=str(root),
         subtitles=_sidecar_subtitles(video),
+        directory_size_bytes=directory_size(video.parent),
     )
 
 
 def _series_item(root: Path, video: Path, library_name: str) -> MediaItem:
     relative = video.relative_to(root)
     show_title = relative.parts[0] if len(relative.parts) > 1 else video.stem
+    show_dir = root / relative.parts[0] if len(relative.parts) > 1 else video.parent
     match = EPISODE_RE.search(video.stem)
     season = int(match.group("season")) if match else _season_from_dirs(video)
     episode = int(match.group("episode")) if match else None
@@ -104,11 +109,12 @@ def _series_item(root: Path, video: Path, library_name: str) -> MediaItem:
         library=library_name,
         library_path=str(root),
         subtitles=_sidecar_subtitles(video),
+        directory_size_bytes=directory_size(show_dir),
     )
 
 
 def _unknown_item(video: Path, library_name: str) -> MediaItem:
-    return MediaItem(kind="unknown", title=_clean_title(video.stem), path=str(video), library=library_name, library_path=str(video.parent))
+    return MediaItem(kind="unknown", title=_clean_title(video.stem), path=str(video), library=library_name, library_path=str(video.parent), directory_size_bytes=directory_size(video.parent))
 
 
 def _clean_title(value: str) -> str:
@@ -153,6 +159,22 @@ def _sidecar_subtitles(video: Path) -> list[str]:
         for path in sorted(video.parent.iterdir())
         if path.is_file() and path.name.startswith(video.stem) and path.suffix.lower() in SUBTITLE_EXTENSIONS
     ]
+
+
+def directory_size(root: Path) -> int:
+    return sum(file.stat().st_size for file in _walk_files(root))
+
+
+def directory_files(root: Path) -> list[dict[str, object]]:
+    return [{"path": path.relative_to(root).as_posix(), "size_bytes": path.stat().st_size} for path in sorted(_walk_files(root))]
+
+
+def _walk_files(root: Path) -> list[Path]:
+    files: list[Path] = []
+    for current, dirs, names in os.walk(root):
+        dirs[:] = [name for name in dirs if name not in IGNORED_DIRS]
+        files.extend(Path(current) / name for name in names)
+    return files
 
 
 def _nfo_path(item: MediaItem) -> Path:
