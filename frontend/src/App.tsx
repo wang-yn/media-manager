@@ -979,7 +979,7 @@ function SeriesTable({
 }) {
   return (
     <div className="table-wrap">
-      <table>
+      <table className="media-table">
         <thead>
           <tr>
             <th className="selection-cell" aria-label="选择"></th>
@@ -1065,7 +1065,7 @@ function MediaTable({
   const selectable = Boolean(selectedKeys && onToggle);
   return (
     <div className="table-wrap">
-      <table>
+      <table className="media-table">
         <thead>
           <tr>
             {selectable ? <th className="selection-cell" aria-label="选择"></th> : null}
