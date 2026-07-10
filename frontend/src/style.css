@@ -38,6 +38,15 @@ select {
   padding: 0 10px;
 }
 
+input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  padding: 0;
+  accent-color: #1f6f64;
+}
+
 button:disabled {
   cursor: wait;
   opacity: 0.7;
@@ -223,6 +232,24 @@ h2 {
   margin-bottom: 14px;
 }
 
+.issue-filters,
+.batch-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.issue-filters label,
+.batch-toolbar {
+  align-items: center;
+}
+
+.issue-filters label {
+  display: inline-flex;
+  gap: 6px;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -240,6 +267,10 @@ th {
   color: #52616b;
   font-size: 12px;
   font-weight: 600;
+}
+
+.selection-cell {
+  width: 42px;
 }
 
 .path {

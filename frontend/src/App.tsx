@@ -27,6 +27,8 @@ type MediaItem = {
   subtitles?: string[];
   nfo_path?: string;
   has_nfo?: boolean;
+  has_metadata: boolean;
+  rename_needed: boolean;
   directory_size_bytes?: number;
 };
 
@@ -95,6 +97,14 @@ type RenamePreview = {
   changes: Array<{ from: string; to: string }>;
 };
 
+type IssueFilter = "missing-metadata" | "missing-subtitles" | "rename-needed";
+
+type BatchTarget = {
+  key: string;
+  item: MediaItem;
+  items: MediaItem[];
+};
+
 type ApiError = {
   error?: {
     code?: string;
@@ -125,6 +135,9 @@ type SeriesSummary = {
   path: string;
   subtitles: string[];
   missingNfo: number;
+  hasMetadata: boolean;
+  renameNeeded: boolean;
+  missingSubtitles: number;
   directorySizeBytes: number;
 };
 
@@ -598,6 +611,14 @@ function LibraryDetailView({
   onBatchRenameSeries: (item: MediaItem) => void;
 }) {
   const [selectedSeriesKey, setSelectedSeriesKey] = useState<string | null>(null);
+  const [issueFilters, setIssueFilters] = useState<IssueFilter[]>([]);
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+
+  useEffect(() => {
+    setSelectedSeriesKey(null);
+    setIssueFilters([]);
+    setSelectedKeys([]);
+  }, [library?.key]);
 
   if (!library) {
     return (
@@ -613,6 +634,22 @@ function LibraryDetailView({
 
   const series = library.kind === "series" ? groupSeriesShows(items) : [];
   const selectedSeries = series.find((show) => show.key === selectedSeriesKey);
+  const visibleSeries = series.filter((show) => seriesMatchesIssues(show, issueFilters));
+  const visibleItems = items.filter((item) => mediaMatchesIssues(item, issueFilters));
+  const visibleTargets: BatchTarget[] =
+    library.kind === "series"
+      ? visibleSeries.map((show) => ({ key: show.key, item: show.representative, items: show.items }))
+      : visibleItems.map((item) => ({ key: item.id, item, items: [item] }));
+  const selectedTargets = visibleTargets.filter((target) => selectedKeys.includes(target.key));
+
+  function toggleIssueFilter(filter: IssueFilter) {
+    setIssueFilters((current) => (current.includes(filter) ? current.filter((item) => item !== filter) : [...current, filter]));
+    setSelectedKeys([]);
+  }
+
+  function toggleSelectedKey(key: string) {
+    setSelectedKeys((current) => (current.includes(key) ? current.filter((item) => item !== key) : [...current, key]));
+  }
 
   return (
     <section className="panel">
@@ -636,11 +673,36 @@ function LibraryDetailView({
           </button>
         )}
       </div>
+      {!selectedSeries ? (
+        <>
+          <IssueFilterBar filters={issueFilters} onToggle={toggleIssueFilter} />
+          <div className="batch-toolbar">
+            <span>已选择 {selectedTargets.length} 项</span>
+            <button type="button" className="link-button" onClick={() => setSelectedKeys(visibleTargets.map((target) => target.key))} disabled={visibleTargets.length === 0}>
+              全选当前结果
+            </button>
+            <button type="button" className="link-button" onClick={() => setSelectedKeys([])} disabled={selectedKeys.length === 0}>
+              清空选择
+            </button>
+          </div>
+        </>
+      ) : null}
       {library.kind === "series" && !selectedSeries ? (
-        <SeriesTable series={series} busy={busy} onSearch={onSearch} onOpen={setSelectedSeriesKey} onDelete={onDeleteSeries} onShowFiles={onShowFiles} />
+        <SeriesTable
+          series={visibleSeries}
+          selectedKeys={selectedKeys}
+          onToggle={toggleSelectedKey}
+          busy={busy}
+          onSearch={onSearch}
+          onOpen={setSelectedSeriesKey}
+          onDelete={onDeleteSeries}
+          onShowFiles={onShowFiles}
+        />
       ) : (
         <MediaTable
-          items={selectedSeries ? selectedSeries.items : items}
+          items={selectedSeries ? selectedSeries.items : visibleItems}
+          selectedKeys={selectedSeries ? undefined : selectedKeys}
+          onToggle={selectedSeries ? undefined : toggleSelectedKey}
           busy={busy}
           showMetadata={library.kind !== "series"}
           onSearch={onSearch}
@@ -653,8 +715,28 @@ function LibraryDetailView({
   );
 }
 
+function IssueFilterBar({ filters, onToggle }: { filters: IssueFilter[]; onToggle: (filter: IssueFilter) => void }) {
+  const options: Array<{ value: IssueFilter; label: string }> = [
+    { value: "missing-metadata", label: "缺少元数据" },
+    { value: "missing-subtitles", label: "缺少字幕" },
+    { value: "rename-needed", label: "命名不规范" },
+  ];
+  return (
+    <div className="issue-filters" aria-label="问题筛选">
+      {options.map((option) => (
+        <label key={option.value}>
+          <input type="checkbox" checked={filters.includes(option.value)} onChange={() => onToggle(option.value)} />
+          {option.label}
+        </label>
+      ))}
+    </div>
+  );
+}
+
 function SeriesTable({
   series,
+  selectedKeys,
+  onToggle,
   busy,
   onSearch,
   onOpen,
@@ -662,6 +744,8 @@ function SeriesTable({
   onShowFiles,
 }: {
   series: SeriesSummary[];
+  selectedKeys: string[];
+  onToggle: (key: string) => void;
   busy: string | null;
   onSearch: (item: MediaItem) => void;
   onOpen: (key: string) => void;
@@ -673,6 +757,7 @@ function SeriesTable({
       <table>
         <thead>
           <tr>
+            <th className="selection-cell" aria-label="选择"></th>
             <th>剧集</th>
             <th>季数</th>
             <th>集数</th>
@@ -686,6 +771,9 @@ function SeriesTable({
         <tbody>
           {series.map((show) => (
             <tr key={show.key}>
+              <td className="selection-cell">
+                <input type="checkbox" checked={selectedKeys.includes(show.key)} onChange={() => onToggle(show.key)} aria-label={`选择 ${mediaTitle(show)}`} />
+              </td>
               <td>{mediaTitle(show)}</td>
               <td>{seasonCountLabel(show)}</td>
               <td>{show.items.length}</td>
@@ -717,7 +805,7 @@ function SeriesTable({
           ))}
           {series.length === 0 ? (
             <tr>
-              <td colSpan={8} className="empty">
+              <td colSpan={9} className="empty">
                 未发现视频
               </td>
             </tr>
@@ -730,6 +818,8 @@ function SeriesTable({
 
 function MediaTable({
   items,
+  selectedKeys,
+  onToggle,
   busy,
   showMetadata = true,
   onSearch,
@@ -738,6 +828,8 @@ function MediaTable({
   onShowFiles,
 }: {
   items: MediaItem[];
+  selectedKeys?: string[];
+  onToggle?: (key: string) => void;
   busy: string | null;
   showMetadata?: boolean;
   onSearch: (item: MediaItem) => void;
@@ -745,11 +837,13 @@ function MediaTable({
   onSearchSubtitle: (item: MediaItem) => void;
   onShowFiles: (item: MediaItem) => void;
 }) {
+  const selectable = Boolean(selectedKeys && onToggle);
   return (
     <div className="table-wrap">
       <table>
         <thead>
           <tr>
+            {selectable ? <th className="selection-cell" aria-label="选择"></th> : null}
             <th>标题</th>
             <th>类型</th>
             <th>季/集</th>
@@ -765,8 +859,10 @@ function MediaTable({
             <Row
               key={item.id}
               item={item}
+              selected={selectable ? selectedKeys?.includes(item.id) : undefined}
               busy={busy}
               showMetadata={showMetadata}
+              onToggle={selectable ? () => onToggle?.(item.id) : undefined}
               onSearch={() => onSearch(item)}
               onRename={() => onRename(item)}
               onSearchSubtitle={() => onSearchSubtitle(item)}
@@ -775,7 +871,7 @@ function MediaTable({
           ))}
           {items.length === 0 ? (
             <tr>
-              <td colSpan={8} className="empty">
+              <td colSpan={selectable ? 9 : 8} className="empty">
                 未发现视频
               </td>
             </tr>
@@ -788,16 +884,20 @@ function MediaTable({
 
 function Row({
   item,
+  selected,
   busy,
   showMetadata,
+  onToggle,
   onSearch,
   onRename,
   onSearchSubtitle,
   onShowFiles,
 }: {
   item: MediaItem;
+  selected?: boolean;
   busy: string | null;
   showMetadata: boolean;
+  onToggle?: () => void;
   onSearch: () => void;
   onRename: () => void;
   onSearchSubtitle: () => void;
@@ -805,6 +905,11 @@ function Row({
 }) {
   return (
     <tr>
+      {onToggle ? (
+        <td className="selection-cell">
+          <input type="checkbox" checked={Boolean(selected)} onChange={onToggle} aria-label={`选择 ${mediaTitle(item)}`} />
+        </td>
+      ) : null}
       <td>{item.year ? `${item.title} (${item.year})` : item.title}</td>
       <td>{item.kind}</td>
       <td>{item.season && item.episode ? `S${pad(item.season)}E${pad(item.episode)}` : "-"}</td>
@@ -1227,6 +1332,9 @@ function groupSeriesShows(items: MediaItem[]) {
       }
       current.subtitles.push(...(item.subtitles ?? []));
       current.missingNfo += item.has_nfo ? 0 : 1;
+      current.hasMetadata ||= item.has_metadata;
+      current.renameNeeded ||= item.rename_needed;
+      current.missingSubtitles += (item.subtitles ?? []).length === 0 ? 1 : 0;
       continue;
     }
     shows.set(key, {
@@ -1239,6 +1347,9 @@ function groupSeriesShows(items: MediaItem[]) {
       path: showPath,
       subtitles: [...(item.subtitles ?? [])],
       missingNfo: item.has_nfo ? 0 : 1,
+      hasMetadata: item.has_metadata,
+      renameNeeded: item.rename_needed,
+      missingSubtitles: (item.subtitles ?? []).length === 0 ? 1 : 0,
       directorySizeBytes: item.directory_size_bytes ?? 0,
     });
   }
@@ -1248,6 +1359,37 @@ function groupSeriesShows(items: MediaItem[]) {
     show.items.sort((left, right) => (left.season ?? 0) - (right.season ?? 0) || (left.episode ?? 0) - (right.episode ?? 0) || left.path.localeCompare(right.path));
   }
   return result.sort((left, right) => mediaTitle(left).localeCompare(mediaTitle(right), "zh-CN"));
+}
+
+function matchesIssues(filters: IssueFilter[], issues: { hasMetadata: boolean; missingSubtitles: boolean; renameNeeded: boolean }) {
+  if (filters.length === 0) {
+    return true;
+  }
+  return filters.some((filter) => {
+    if (filter === "missing-metadata") {
+      return !issues.hasMetadata;
+    }
+    if (filter === "missing-subtitles") {
+      return issues.missingSubtitles;
+    }
+    return issues.renameNeeded;
+  });
+}
+
+function mediaMatchesIssues(item: MediaItem, filters: IssueFilter[]) {
+  return matchesIssues(filters, {
+    hasMetadata: item.has_metadata,
+    missingSubtitles: (item.subtitles ?? []).length === 0,
+    renameNeeded: item.rename_needed,
+  });
+}
+
+function seriesMatchesIssues(show: SeriesSummary, filters: IssueFilter[]) {
+  return matchesIssues(filters, {
+    hasMetadata: show.hasMetadata,
+    missingSubtitles: show.missingSubtitles > 0,
+    renameNeeded: show.renameNeeded,
+  });
 }
 
 function mediaTitle(item: Pick<MediaItem, "title" | "year">) {
