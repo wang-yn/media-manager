@@ -39,6 +39,77 @@ PYTHONPATH=backend/src .venv/bin/python -m unittest discover backend/tests
 cd frontend && npm run build
 ```
 
+## Docker 部署
+
+准备配置和媒体目录：
+
+```bash
+mkdir -p config media/movies media/tv
+cp -n config/config.example.toml config/config.toml
+```
+
+`config/config.toml` 中的媒体库路径使用容器内路径，例如 `/media/movies`、`/media/tv`。宿主机目录通过 `-v` 挂载到容器内的 `/config` 和 `/media`。
+
+构建镜像：
+
+```bash
+docker build -t media-manager:local .
+```
+
+启动容器：
+
+```bash
+docker run -d \
+  --name media-manager \
+  -p 8000:8000 \
+  -e TMDB_API_KEY=你的_TMDB_API_KEY \
+  -e ASSRT_API_TOKEN=你的_ASSRT_API_TOKEN \
+  -v "$PWD/config:/config" \
+  -v "$PWD/media:/media" \
+  --restart unless-stopped \
+  media-manager:local
+```
+
+访问 `http://localhost:8000`。检查状态：
+
+```bash
+curl http://localhost:8000/api/health
+```
+
+停止并删除容器：
+
+```bash
+docker stop media-manager
+docker rm media-manager
+```
+
+## Docker Compose 部署
+
+准备配置：
+
+```bash
+mkdir -p config media/movies media/tv
+cp -n config/config.example.toml config/config.toml
+```
+
+设置密钥并启动：
+
+```bash
+export TMDB_API_KEY=你的_TMDB_API_KEY
+export ASSRT_API_TOKEN=你的_ASSRT_API_TOKEN
+docker compose up -d --build
+```
+
+常用命令：
+
+```bash
+docker compose logs -f media-manager
+docker compose ps
+docker compose down
+```
+
+启动后访问 `http://localhost:8000`。如果不需要字幕下载，可以不设置 `ASSRT_API_TOKEN`；如果不需要 TMDB 元数据刮削，可以不设置 `TMDB_API_KEY`。
+
 ## API
 
 - `GET /api/health`

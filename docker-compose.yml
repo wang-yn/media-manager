@@ -5,6 +5,7 @@ services:
     environment:
       - TZ=Asia/Shanghai
       - TMDB_API_KEY=${TMDB_API_KEY:-}
+      - ASSRT_API_TOKEN=${ASSRT_API_TOKEN:-}
     volumes:
       - ./config:/config
       - ./media:/media
