@@ -105,6 +105,26 @@ type BatchTarget = {
   items: MediaItem[];
 };
 
+type GuidedBatchKind = "metadata" | "subtitle";
+
+type BatchResult = {
+  label: string;
+  status: "success" | "failed" | "skipped";
+  error?: string;
+};
+
+type GuidedBatch = {
+  kind: GuidedBatchKind;
+  items: MediaItem[];
+  index: number;
+  results: BatchResult[];
+};
+
+type BatchSummary = {
+  title: string;
+  results: BatchResult[];
+};
+
 type ApiError = {
   error?: {
     code?: string;
@@ -150,11 +170,20 @@ export default function App() {
   const [renameDialog, setRenameDialog] = useState<RenameDialog | null>(null);
   const [metadataDialog, setMetadataDialog] = useState<MetadataDialog | null>(null);
   const [subtitleDialog, setSubtitleDialog] = useState<SubtitleDialog | null>(null);
+  const [guidedBatch, setGuidedBatch] = useState<GuidedBatch | null>(null);
+  const [batchSummary, setBatchSummary] = useState<BatchSummary | null>(null);
   const [filesDialog, setFilesDialog] = useState<FilesDialog | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const metadataSearchId = useRef(0);
   const subtitleSearchId = useRef(0);
+  const guidedBatchRef = useRef<GuidedBatch | null>(null);
+  const guidedBatchRunId = useRef(0);
+
+  function setGuidedBatchState(next: GuidedBatch | null) {
+    guidedBatchRef.current = next;
+    setGuidedBatch(next);
+  }
 
   async function refreshContent() {
     const [librariesData, mediaData] = await Promise.all([request<Library[]>("/api/libraries"), request<MediaResponse>("/api/media")]);
@@ -236,6 +265,7 @@ export default function App() {
     if (dialog.selectedId === undefined) {
       return;
     }
+    const batchRunId = guidedBatchRef.current?.kind === "metadata" ? guidedBatchRunId.current : undefined;
     const busyKey = `metadata:${dialog.item.id}`;
     setBusy(busyKey);
     try {
@@ -243,6 +273,12 @@ export default function App() {
         method: "POST",
         body: JSON.stringify({ tmdb_id: dialog.selectedId }),
       });
+      if (batchRunId !== undefined) {
+        if (guidedBatchRunId.current === batchRunId && guidedBatchRef.current?.items[guidedBatchRef.current.index]?.id === dialog.item.id) {
+          advanceGuidedBatch("success");
+        }
+        return;
+      }
       setMetadataDialog(null);
       await refreshContent();
     } catch (err) {
@@ -318,6 +354,7 @@ export default function App() {
     if (dialog.selectedId === undefined) {
       return;
     }
+    const batchRunId = guidedBatchRef.current?.kind === "subtitle" ? guidedBatchRunId.current : undefined;
     const busyKey = `subtitle-download:${dialog.item.id}`;
     setBusy(busyKey);
     try {
@@ -325,6 +362,12 @@ export default function App() {
         method: "POST",
         body: JSON.stringify({ subtitle_id: dialog.selectedId }),
       });
+      if (batchRunId !== undefined) {
+        if (guidedBatchRunId.current === batchRunId && guidedBatchRef.current?.items[guidedBatchRef.current.index]?.id === dialog.item.id) {
+          advanceGuidedBatch("success");
+        }
+        return;
+      }
       setSubtitleDialog(null);
       await refreshContent();
     } catch (err) {
@@ -387,6 +430,97 @@ export default function App() {
     }
   }
 
+  function openGuidedBatchItem(kind: GuidedBatchKind, item: MediaItem) {
+    if (kind === "metadata") {
+      openMetadataDialog(item);
+      return;
+    }
+    openSubtitleDialog(item);
+  }
+
+  function startGuidedBatch(kind: GuidedBatchKind, items: MediaItem[], skipped: MediaItem[]) {
+    const results = skipped.map((item) => ({ label: guidedBatchLabel(kind, item), status: "skipped" as const }));
+    setBatchSummary(null);
+    guidedBatchRunId.current += 1;
+    if (items.length === 0) {
+      setGuidedBatchState(null);
+      setBatchSummary({ title: guidedBatchSummaryTitle(kind), results });
+      return;
+    }
+    const next = { kind, items, index: 0, results };
+    setGuidedBatchState(next);
+    openGuidedBatchItem(kind, items[0]);
+  }
+
+  function startMetadataBatch(targets: BatchTarget[]) {
+    const items: MediaItem[] = [];
+    const skipped: MediaItem[] = [];
+    for (const target of targets) {
+      if (target.item.has_metadata) {
+        skipped.push(target.item);
+      } else {
+        items.push(target.item);
+      }
+    }
+    startGuidedBatch("metadata", items, skipped);
+  }
+
+  function startSubtitleBatch(targets: BatchTarget[]) {
+    const items = targets.flatMap((target) => target.items).sort(compareEpisodes);
+    startGuidedBatch(
+      "subtitle",
+      items.filter((item) => (item.subtitles ?? []).length === 0),
+      items.filter((item) => (item.subtitles ?? []).length > 0),
+    );
+  }
+
+  function finishGuidedBatch(results: BatchResult[], kind?: GuidedBatchKind) {
+    const title = guidedBatchSummaryTitle(kind ?? guidedBatchRef.current?.kind ?? "metadata");
+    guidedBatchRunId.current += 1;
+    setGuidedBatchState(null);
+    setMetadataDialog(null);
+    setSubtitleDialog(null);
+    setBatchSummary({ title, results });
+    refreshContent().catch((err) => setError(messageFrom(err)));
+  }
+
+  function advanceGuidedBatch(status: "success" | "skipped") {
+    const batch = guidedBatchRef.current;
+    if (!batch) {
+      return;
+    }
+    const current = batch.items[batch.index];
+    const results = [...batch.results, { label: guidedBatchLabel(batch.kind, current), status }];
+    const nextIndex = batch.index + 1;
+    if (nextIndex >= batch.items.length) {
+      finishGuidedBatch(results, batch.kind);
+      return;
+    }
+    const next = { ...batch, index: nextIndex, results };
+    setGuidedBatchState(next);
+    openGuidedBatchItem(batch.kind, batch.items[nextIndex]);
+  }
+
+  function skipGuidedBatch() {
+    advanceGuidedBatch("skipped");
+  }
+
+  function cancelGuidedBatch() {
+    const batch = guidedBatchRef.current;
+    if (!batch) {
+      setMetadataDialog(null);
+      setSubtitleDialog(null);
+      return;
+    }
+    const current = batch.items[batch.index];
+    const error = batch.kind === "metadata" ? metadataDialog?.error : subtitleDialog?.error;
+    const currentResult: BatchResult = error
+      ? { label: guidedBatchLabel(batch.kind, current), status: "failed", error }
+      : { label: guidedBatchLabel(batch.kind, current), status: "skipped" };
+    const remaining = batch.items.slice(batch.index + 1).map((item) => ({ label: guidedBatchLabel(batch.kind, item), status: "skipped" as const }));
+    finishGuidedBatch([...batch.results, currentResult, ...remaining], batch.kind);
+  }
+
   useEffect(() => {
     refresh();
   }, []);
@@ -444,6 +578,8 @@ export default function App() {
           onDeleteSeries={deleteSeries}
           onShowFiles={openFilesDialog}
           onBatchRenameSeries={batchRenameSeries}
+          onBatchMetadata={startMetadataBatch}
+          onBatchSubtitles={startSubtitleBatch}
         />
       ) : null}
 
@@ -456,7 +592,9 @@ export default function App() {
           onChange={setMetadataDialog}
           onSearch={searchMetadata}
           onApply={applySelectedMetadata}
-          onClose={() => setMetadataDialog(null)}
+          onClose={cancelGuidedBatch}
+          progress={guidedBatch?.kind === "metadata" ? { current: guidedBatch.index + 1, total: guidedBatch.items.length } : undefined}
+          onSkip={guidedBatch?.kind === "metadata" ? skipGuidedBatch : undefined}
         />
       ) : null}
 
@@ -471,11 +609,14 @@ export default function App() {
           onChange={setSubtitleDialog}
           onSearch={searchSubtitles}
           onDownload={downloadSelectedSubtitle}
-          onClose={() => setSubtitleDialog(null)}
+          onClose={cancelGuidedBatch}
+          progress={guidedBatch?.kind === "subtitle" ? { current: guidedBatch.index + 1, total: guidedBatch.items.length } : undefined}
+          onSkip={guidedBatch?.kind === "subtitle" ? skipGuidedBatch : undefined}
         />
       ) : null}
 
       {filesDialog ? <FilesDialogView dialog={filesDialog} busy={busy} onClose={() => setFilesDialog(null)} /> : null}
+      {batchSummary ? <BatchSummaryDialog summary={batchSummary} onClose={() => setBatchSummary(null)} /> : null}
     </main>
   );
 }
@@ -599,6 +740,8 @@ function LibraryDetailView({
   onDeleteSeries,
   onShowFiles,
   onBatchRenameSeries,
+  onBatchMetadata,
+  onBatchSubtitles,
 }: {
   library?: LibrarySummary;
   items: MediaItem[];
@@ -609,6 +752,8 @@ function LibraryDetailView({
   onDeleteSeries: (item: MediaItem) => void;
   onShowFiles: (item: MediaItem) => void;
   onBatchRenameSeries: (item: MediaItem) => void;
+  onBatchMetadata: (targets: BatchTarget[]) => void;
+  onBatchSubtitles: (targets: BatchTarget[]) => void;
 }) {
   const [selectedSeriesKey, setSelectedSeriesKey] = useState<string | null>(null);
   const [issueFilters, setIssueFilters] = useState<IssueFilter[]>([]);
@@ -683,6 +828,12 @@ function LibraryDetailView({
             </button>
             <button type="button" className="link-button" onClick={() => setSelectedKeys([])} disabled={selectedKeys.length === 0}>
               清空选择
+            </button>
+            <button type="button" onClick={() => onBatchMetadata(selectedTargets)} disabled={selectedTargets.length === 0}>
+              批量刮削
+            </button>
+            <button type="button" onClick={() => onBatchSubtitles(selectedTargets)} disabled={selectedTargets.length === 0}>
+              批量字幕
             </button>
           </div>
         </>
@@ -1106,6 +1257,8 @@ function MetadataDialogView({
   onSearch,
   onApply,
   onClose,
+  progress,
+  onSkip,
 }: {
   dialog: MetadataDialog;
   busy: string | null;
@@ -1113,19 +1266,23 @@ function MetadataDialogView({
   onSearch: (dialog: MetadataDialog) => void;
   onApply: (dialog: MetadataDialog) => void;
   onClose: () => void;
+  progress?: { current: number; total: number };
+  onSkip?: () => void;
 }) {
   const searching = busy === `metadata-search:${dialog.item.id}`;
   const applying = busy === `metadata:${dialog.item.id}`;
+  const closeDisabled = Boolean(progress && applying);
 
   return (
     <div className="dialog-backdrop">
       <section className="dialog" role="dialog" aria-modal="true" aria-label="刮削元数据">
-        <button type="button" className="dialog-close" onClick={onClose} aria-label="关闭">
+        <button type="button" className="dialog-close" onClick={onClose} aria-label="关闭" disabled={closeDisabled}>
           X
         </button>
         <div className="section-head">
           <div>
             <h2>刮削元数据</h2>
+            {progress ? <p className="batch-progress">{progress.current} / {progress.total}</p> : null}
             <p className="path">{relativeLibraryPath(dialog.item.path, dialog.item.library_path)}</p>
           </div>
         </div>
@@ -1155,8 +1312,13 @@ function MetadataDialogView({
           <button type="button" onClick={() => onApply(dialog)} disabled={dialog.selectedId === undefined || searching || applying}>
             {applying ? "写入中" : "确定"}
           </button>
-          <button type="button" className="link-button" onClick={onClose}>
-            取消
+          {onSkip ? (
+            <button type="button" className="link-button" onClick={onSkip} disabled={searching || applying}>
+              跳过
+            </button>
+          ) : null}
+          <button type="button" className="link-button" onClick={onClose} disabled={closeDisabled}>
+            {progress ? "取消批量" : "取消"}
           </button>
         </div>
       </section>
@@ -1171,6 +1333,8 @@ function SubtitleDialogView({
   onSearch,
   onDownload,
   onClose,
+  progress,
+  onSkip,
 }: {
   dialog: SubtitleDialog;
   busy: string | null;
@@ -1178,19 +1342,23 @@ function SubtitleDialogView({
   onSearch: (dialog: SubtitleDialog) => void;
   onDownload: (dialog: SubtitleDialog) => void;
   onClose: () => void;
+  progress?: { current: number; total: number };
+  onSkip?: () => void;
 }) {
   const searching = busy === `subtitle-search:${dialog.item.id}`;
   const downloading = busy === `subtitle-download:${dialog.item.id}`;
+  const closeDisabled = Boolean(progress && downloading);
 
   return (
     <div className="dialog-backdrop">
       <section className="dialog" role="dialog" aria-modal="true" aria-label="搜索字幕">
-        <button type="button" className="dialog-close" onClick={onClose} aria-label="关闭">
+        <button type="button" className="dialog-close" onClick={onClose} aria-label="关闭" disabled={closeDisabled}>
           X
         </button>
         <div className="section-head">
           <div>
             <h2>搜索字幕</h2>
+            {progress ? <p className="batch-progress">{progress.current} / {progress.total}</p> : null}
             <p className="path">{relativeLibraryPath(dialog.item.path, dialog.item.library_path)}</p>
           </div>
         </div>
@@ -1220,8 +1388,52 @@ function SubtitleDialogView({
           <button type="button" onClick={() => onDownload(dialog)} disabled={dialog.selectedId === undefined || searching || downloading}>
             {downloading ? "下载中" : "下载字幕"}
           </button>
-          <button type="button" className="link-button" onClick={onClose}>
-            取消
+          {onSkip ? (
+            <button type="button" className="link-button" onClick={onSkip} disabled={searching || downloading}>
+              跳过
+            </button>
+          ) : null}
+          <button type="button" className="link-button" onClick={onClose} disabled={closeDisabled}>
+            {progress ? "取消批量" : "取消"}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function BatchSummaryDialog({ summary, onClose }: { summary: BatchSummary; onClose: () => void }) {
+  const success = summary.results.filter((result) => result.status === "success").length;
+  const failed = summary.results.filter((result) => result.status === "failed").length;
+  const skipped = summary.results.filter((result) => result.status === "skipped").length;
+  const failures = summary.results.filter((result) => result.status === "failed");
+
+  return (
+    <div className="dialog-backdrop">
+      <section className="dialog" role="dialog" aria-modal="true" aria-label={summary.title}>
+        <button type="button" className="dialog-close" onClick={onClose} aria-label="关闭">
+          X
+        </button>
+        <div className="section-head">
+          <h2>{summary.title}</h2>
+        </div>
+        <div className="batch-counts">
+          <span className="good">成功 {success}</span>
+          <span className={failed > 0 ? "error" : ""}>失败 {failed}</span>
+          <span>跳过 {skipped}</span>
+        </div>
+        {failures.length > 0 ? (
+          <div className="subtitle-results">
+            {failures.map((failure, index) => (
+              <p key={`${failure.label}:${index}`} className="notice error">
+                {failure.label}：{failure.error ?? "操作失败"}
+              </p>
+            ))}
+          </div>
+        ) : null}
+        <div className="dialog-actions">
+          <button type="button" onClick={onClose}>
+            确定
           </button>
         </div>
       </section>
@@ -1356,7 +1568,7 @@ function groupSeriesShows(items: MediaItem[]) {
   const result = [...shows.values()];
   for (const show of result) {
     show.seasons.sort((left, right) => left - right);
-    show.items.sort((left, right) => (left.season ?? 0) - (right.season ?? 0) || (left.episode ?? 0) - (right.episode ?? 0) || left.path.localeCompare(right.path));
+    show.items.sort(compareEpisodes);
   }
   return result.sort((left, right) => mediaTitle(left).localeCompare(mediaTitle(right), "zh-CN"));
 }
@@ -1394,6 +1606,21 @@ function seriesMatchesIssues(show: SeriesSummary, filters: IssueFilter[]) {
 
 function mediaTitle(item: Pick<MediaItem, "title" | "year">) {
   return item.year ? `${item.title} (${item.year})` : item.title;
+}
+
+function compareEpisodes(left: MediaItem, right: MediaItem) {
+  return (left.season ?? 0) - (right.season ?? 0) || (left.episode ?? 0) - (right.episode ?? 0) || left.path.localeCompare(right.path);
+}
+
+function guidedBatchLabel(kind: GuidedBatchKind, item: MediaItem) {
+  if (kind === "subtitle" && item.season !== undefined && item.episode !== undefined) {
+    return `${mediaTitle(item)} S${pad(item.season)}E${pad(item.episode)}`;
+  }
+  return mediaTitle(item);
+}
+
+function guidedBatchSummaryTitle(kind: GuidedBatchKind) {
+  return kind === "metadata" ? "批量刮削结果" : "批量字幕结果";
 }
 
 function nfoLabel(summary: Pick<SeriesSummary, "items" | "missingNfo">) {

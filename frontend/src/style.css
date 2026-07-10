@@ -478,6 +478,18 @@ th {
   color: #52616b;
 }
 
+.batch-progress {
+  color: #52616b;
+  font-size: 13px;
+}
+
+.batch-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 14px 0;
+}
+
 .dialog-actions {
   display: flex;
   gap: 10px;
