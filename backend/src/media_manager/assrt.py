@@ -118,8 +118,6 @@ def download_subtitle(item: MediaItem, subtitle_id: int, client: object) -> Path
     extension = Path(source_name).suffix.lower()
     video = Path(item.path)
     target = video.with_name(f"{video.stem}.zh{extension}")
-    if target.exists():
-        raise AppError("subtitle_target_exists", "字幕文件已存在", path=str(target))
     content = client.download(source_url)
     try:
         target.write_bytes(content)

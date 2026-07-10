@@ -174,19 +174,19 @@ class SubtitleDownloadTest(unittest.TestCase):
             self.assertEqual(client.downloaded_url, "https://file/sub.srt")
             self.assertEqual(target.read_bytes(), b"hello")
 
-    def test_download_subtitle_rejects_existing_target(self) -> None:
+    def test_download_subtitle_overwrites_existing_target(self) -> None:
         with TemporaryDirectory() as tmp:
             video = Path(tmp) / "Pantheon - S01E03.mkv"
             target = Path(tmp) / "Pantheon - S01E03.zh.ass"
             video.write_text("", encoding="utf-8")
             target.write_text("old", encoding="utf-8")
             item = MediaItem("series", "Pantheon", str(video), "TV", str(Path(tmp)), season=1, episode=3)
-            client = FakeSubtitleClient({"filelist": [{"f": "episode.ass", "url": "https://file/sub.ass"}]})
+            client = FakeSubtitleClient({"filelist": [{"f": "episode.ass", "url": "https://file/sub.ass"}]}, b"new")
 
-            with self.assertRaises(AppError) as context:
-                download_subtitle(item, 123456, client)
+            result = download_subtitle(item, 123456, client)
 
-        self.assertEqual(context.exception.code, "subtitle_target_exists")
+            self.assertEqual(result, target)
+            self.assertEqual(target.read_bytes(), b"new")
 
     def test_download_subtitle_rejects_archive_only_result(self) -> None:
         with TemporaryDirectory() as tmp:

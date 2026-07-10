@@ -31,6 +31,10 @@ class MetadataApplyInput(BaseModel):
     tmdb_id: int
 
 
+class MetadataSearchInput(BaseModel):
+    query: str | None = None
+
+
 class SubtitleSearchInput(BaseModel):
     query: str | None = None
 
@@ -85,10 +89,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return {"count": len(items), "items": items}
 
     @app.post("/api/media/{media_id}/metadata/search")
-    def metadata_search(media_id: str) -> dict[str, object]:
+    def metadata_search(media_id: str, input: MetadataSearchInput | None = None) -> dict[str, object]:
         item = _find_media(app, media_id)
-        results = _tmdb(app).search(item.title, item.kind, item.year)
-        return {"results": results}
+        query = (input.query.strip() if input and input.query else "") or item.title
+        results = _tmdb(app).search(query, item.kind, item.year)
+        return {"query": query, "results": results}
 
     @app.post("/api/media/{media_id}/metadata/apply")
     def metadata_apply(media_id: str, input: MetadataApplyInput) -> dict[str, str]:

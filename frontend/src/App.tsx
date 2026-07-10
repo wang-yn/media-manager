@@ -61,6 +61,20 @@ type SubtitleDialog = {
   error?: string;
 };
 
+type MetadataDialog = {
+  item: MediaItem;
+  query: string;
+  results: Candidate[];
+  selectedId?: number;
+  error?: string;
+};
+
+type RenameDialog = {
+  item: MediaItem;
+  preview?: RenamePreview;
+  error?: string;
+};
+
 type RenamePreview = {
   can_apply: boolean;
   conflicts: string[];
@@ -87,17 +101,30 @@ type LibrarySummary = Library & {
   errors: number;
 };
 
+type SeasonSummary = {
+  key: string;
+  title: string;
+  year?: number;
+  season: number;
+  items: MediaItem[];
+  representative: MediaItem;
+  path: string;
+  subtitles: string[];
+  missingNfo: number;
+};
+
 export default function App() {
   const [view, setView] = useState<View>(() => parseHash());
   const [health, setHealth] = useState<Health | null>(null);
   const [libraries, setLibraries] = useState<Library[]>([]);
   const [media, setMedia] = useState<MediaResponse>(emptyMedia);
   const [form, setForm] = useState<Library>({ name: "", kind: "movie", path: "" });
-  const [candidates, setCandidates] = useState<Record<string, Candidate[]>>({});
-  const [previews, setPreviews] = useState<Record<string, RenamePreview>>({});
+  const [renameDialog, setRenameDialog] = useState<RenameDialog | null>(null);
+  const [metadataDialog, setMetadataDialog] = useState<MetadataDialog | null>(null);
   const [subtitleDialog, setSubtitleDialog] = useState<SubtitleDialog | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const metadataSearchId = useRef(0);
   const subtitleSearchId = useRef(0);
 
   async function refreshContent() {
@@ -144,63 +171,87 @@ export default function App() {
     }
   }
 
-  async function searchMetadata(item: MediaItem) {
-    setBusy(`search:${item.id}`);
-    setError(null);
+  function openMetadataDialog(item: MediaItem) {
+    const dialog = { item, query: item.title, results: [] };
+    setMetadataDialog(dialog);
+    searchMetadata(dialog);
+  }
+
+  async function searchMetadata(dialog: MetadataDialog) {
+    const searchId = metadataSearchId.current + 1;
+    metadataSearchId.current = searchId;
+    const busyKey = `metadata-search:${dialog.item.id}`;
+    setBusy(busyKey);
     try {
-      const result = await request<{ results: Candidate[] }>(`/api/media/${item.id}/metadata/search`, { method: "POST" });
-      setCandidates((current) => ({ ...current, [item.id]: result.results }));
+      const result = await request<{ query: string; results: Candidate[] }>(`/api/media/${dialog.item.id}/metadata/search`, {
+        method: "POST",
+        body: JSON.stringify({ query: dialog.query }),
+      });
+      setMetadataDialog((current) =>
+        current?.item.id === dialog.item.id && current.query === dialog.query && metadataSearchId.current === searchId
+          ? { ...current, query: result.query, results: result.results, selectedId: undefined, error: undefined }
+          : current,
+      );
     } catch (err) {
-      setError(messageFrom(err));
+      setMetadataDialog((current) =>
+        current?.item.id === dialog.item.id && current.query === dialog.query && metadataSearchId.current === searchId ? { ...current, error: messageFrom(err) } : current,
+      );
     } finally {
-      setBusy(null);
+      if (metadataSearchId.current === searchId) {
+        setBusy((current) => (current === busyKey ? null : current));
+      }
     }
   }
 
-  async function applyMetadata(item: MediaItem, candidate: Candidate) {
-    setBusy(`metadata:${item.id}`);
-    setError(null);
+  async function applySelectedMetadata(dialog: MetadataDialog) {
+    if (dialog.selectedId === undefined) {
+      return;
+    }
+    const busyKey = `metadata:${dialog.item.id}`;
+    setBusy(busyKey);
     try {
-      await request<{ nfo_path: string }>(`/api/media/${item.id}/metadata/apply`, {
+      await request<{ nfo_path: string }>(`/api/media/${dialog.item.id}/metadata/apply`, {
         method: "POST",
-        body: JSON.stringify({ tmdb_id: candidate.id }),
+        body: JSON.stringify({ tmdb_id: dialog.selectedId }),
       });
-      setCandidates((current) => ({ ...current, [item.id]: [] }));
+      setMetadataDialog(null);
       await refreshContent();
     } catch (err) {
-      setError(messageFrom(err));
+      setMetadataDialog((current) => (current?.item.id === dialog.item.id ? { ...current, error: messageFrom(err) } : current));
     } finally {
-      setBusy(null);
+      setBusy((current) => (current === busyKey ? null : current));
     }
   }
 
-  async function previewRename(item: MediaItem) {
-    setBusy(`preview:${item.id}`);
+  async function openRenameDialog(item: MediaItem) {
+    const busyKey = `preview:${item.id}`;
+    setRenameDialog({ item });
+    setBusy(busyKey);
     setError(null);
     try {
       const preview = await request<RenamePreview>(`/api/media/${item.id}/rename/preview`, { method: "POST" });
-      setPreviews((current) => ({ ...current, [item.id]: preview }));
+      setRenameDialog((current) => (current?.item.id === item.id ? { ...current, preview, error: undefined } : current));
     } catch (err) {
-      setError(messageFrom(err));
+      setRenameDialog((current) => (current?.item.id === item.id ? { ...current, error: messageFrom(err) } : current));
     } finally {
-      setBusy(null);
+      setBusy((current) => (current === busyKey ? null : current));
     }
   }
 
-  async function applyRename(item: MediaItem) {
-    if (!window.confirm(`确认执行重命名并移动文件？\n\n${item.title}`)) {
+  async function applyRename(dialog: RenameDialog) {
+    if (!dialog.preview?.can_apply || !hasRenameChanges(dialog.preview)) {
       return;
     }
-    setBusy(`rename:${item.id}`);
-    setError(null);
+    const busyKey = `rename:${dialog.item.id}`;
+    setBusy(busyKey);
     try {
-      await request(`/api/media/${item.id}/rename/apply`, { method: "POST" });
-      setPreviews((current) => ({ ...current, [item.id]: { can_apply: false, conflicts: [], changes: [] } }));
+      await request(`/api/media/${dialog.item.id}/rename/apply`, { method: "POST" });
+      setRenameDialog(null);
       await refreshContent();
     } catch (err) {
-      setError(messageFrom(err));
+      setRenameDialog((current) => (current?.item.id === dialog.item.id ? { ...current, error: messageFrom(err) } : current));
     } finally {
-      setBusy(null);
+      setBusy((current) => (current === busyKey ? null : current));
     }
   }
 
@@ -304,18 +355,29 @@ export default function App() {
         <LibraryDetailView
           library={currentLibrary}
           items={currentItems}
-          candidates={candidates}
-          previews={previews}
           busy={busy}
-          onSearch={searchMetadata}
-          onApplyMetadata={applyMetadata}
-          onPreviewRename={previewRename}
-          onApplyRename={applyRename}
+          onSearch={openMetadataDialog}
+          onRename={openRenameDialog}
           onSearchSubtitle={openSubtitleDialog}
         />
       ) : null}
 
       {view.name === "home" ? <HomeView summaries={summaries} /> : null}
+
+      {metadataDialog ? (
+        <MetadataDialogView
+          dialog={metadataDialog}
+          busy={busy}
+          onChange={setMetadataDialog}
+          onSearch={searchMetadata}
+          onApply={applySelectedMetadata}
+          onClose={() => setMetadataDialog(null)}
+        />
+      ) : null}
+
+      {renameDialog ? (
+        <RenameDialogView dialog={renameDialog} busy={busy} onApply={applyRename} onClose={() => setRenameDialog(null)} />
+      ) : null}
 
       {subtitleDialog ? (
         <SubtitleDialogView
@@ -443,26 +505,20 @@ function LibraryTable({ libraries }: { libraries: Library[] }) {
 function LibraryDetailView({
   library,
   items,
-  candidates,
-  previews,
   busy,
   onSearch,
-  onApplyMetadata,
-  onPreviewRename,
-  onApplyRename,
+  onRename,
   onSearchSubtitle,
 }: {
   library?: LibrarySummary;
   items: MediaItem[];
-  candidates: Record<string, Candidate[]>;
-  previews: Record<string, RenamePreview>;
   busy: string | null;
   onSearch: (item: MediaItem) => void;
-  onApplyMetadata: (item: MediaItem, candidate: Candidate) => void;
-  onPreviewRename: (item: MediaItem) => void;
-  onApplyRename: (item: MediaItem) => void;
+  onRename: (item: MediaItem) => void;
   onSearchSubtitle: (item: MediaItem) => void;
 }) {
+  const [selectedSeasonKey, setSelectedSeasonKey] = useState<string | null>(null);
+
   if (!library) {
     return (
       <section className="empty-state">
@@ -475,51 +531,116 @@ function LibraryDetailView({
     );
   }
 
+  const seasons = library.kind === "series" ? groupSeriesSeasons(items) : [];
+  const selectedSeason = seasons.find((season) => season.key === selectedSeasonKey);
+
   return (
     <section className="panel">
       <div className="section-head">
         <div>
-          <h2>{library.name}</h2>
-          <p className="path">{library.path}</p>
+          <h2>{selectedSeason ? `${mediaTitle(selectedSeason)} / 第 ${pad(selectedSeason.season)} 季` : library.name}</h2>
+          <p className="path">{selectedSeason ? relativeLibraryPath(selectedSeason.path, library.path) : library.path}</p>
         </div>
-        <button type="button" className="link-button" onClick={() => setHash({ name: "home" })}>
-          返回媒体库
-        </button>
+        {selectedSeason ? (
+          <button type="button" className="link-button" onClick={() => setSelectedSeasonKey(null)}>
+            返回季列表
+          </button>
+        ) : (
+          <button type="button" className="link-button" onClick={() => setHash({ name: "home" })}>
+            返回媒体库
+          </button>
+        )}
       </div>
-      <MediaTable
-        items={items}
-        candidates={candidates}
-        previews={previews}
-        busy={busy}
-        onSearch={onSearch}
-        onApplyMetadata={onApplyMetadata}
-        onPreviewRename={onPreviewRename}
-        onApplyRename={onApplyRename}
-        onSearchSubtitle={onSearchSubtitle}
-      />
+      {library.kind === "series" && !selectedSeason ? (
+        <SeasonTable seasons={seasons} busy={busy} onSearch={onSearch} onOpen={setSelectedSeasonKey} />
+      ) : (
+        <MediaTable
+          items={selectedSeason ? selectedSeason.items : items}
+          busy={busy}
+          showMetadata={library.kind !== "series"}
+          onSearch={onSearch}
+          onRename={onRename}
+          onSearchSubtitle={onSearchSubtitle}
+        />
+      )}
     </section>
+  );
+}
+
+function SeasonTable({
+  seasons,
+  busy,
+  onSearch,
+  onOpen,
+}: {
+  seasons: SeasonSummary[];
+  busy: string | null;
+  onSearch: (item: MediaItem) => void;
+  onOpen: (key: string) => void;
+}) {
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>剧集</th>
+            <th>季</th>
+            <th>集数</th>
+            <th>NFO</th>
+            <th>字幕</th>
+            <th>路径</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {seasons.map((season) => (
+            <tr key={season.key}>
+              <td>{mediaTitle(season)}</td>
+              <td>第 {pad(season.season)} 季</td>
+              <td>{season.items.length}</td>
+              <td className={season.missingNfo === 0 ? "good" : "warn"}>{seasonNfoLabel(season)}</td>
+              <td>
+                <SubtitleTags subtitles={season.subtitles} />
+              </td>
+              <td className="path">{relativeLibraryPath(season.path, season.representative.library_path)}</td>
+              <td>
+                <div className="actions">
+                  <button type="button" onClick={() => onSearch(season.representative)} disabled={busy === `metadata-search:${season.representative.id}`}>
+                    刮削
+                  </button>
+                  <button type="button" onClick={() => onOpen(season.key)}>
+                    查看分集
+                  </button>
+                </div>
+              </td>
+            </tr>
+          ))}
+          {seasons.length === 0 ? (
+            <tr>
+              <td colSpan={7} className="empty">
+                未发现视频
+              </td>
+            </tr>
+          ) : null}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
 function MediaTable({
   items,
-  candidates,
-  previews,
   busy,
+  showMetadata = true,
   onSearch,
-  onApplyMetadata,
-  onPreviewRename,
-  onApplyRename,
+  onRename,
   onSearchSubtitle,
 }: {
   items: MediaItem[];
-  candidates: Record<string, Candidate[]>;
-  previews: Record<string, RenamePreview>;
   busy: string | null;
+  showMetadata?: boolean;
   onSearch: (item: MediaItem) => void;
-  onApplyMetadata: (item: MediaItem, candidate: Candidate) => void;
-  onPreviewRename: (item: MediaItem) => void;
-  onApplyRename: (item: MediaItem) => void;
+  onRename: (item: MediaItem) => void;
   onSearchSubtitle: (item: MediaItem) => void;
 }) {
   return (
@@ -531,6 +652,7 @@ function MediaTable({
             <th>类型</th>
             <th>季/集</th>
             <th>NFO</th>
+            <th>字幕</th>
             <th>路径</th>
             <th>操作</th>
           </tr>
@@ -540,19 +662,16 @@ function MediaTable({
             <Row
               key={item.id}
               item={item}
-              candidates={candidates[item.id] ?? []}
-              preview={previews[item.id]}
               busy={busy}
+              showMetadata={showMetadata}
               onSearch={() => onSearch(item)}
-              onApplyMetadata={(candidate) => onApplyMetadata(item, candidate)}
-              onPreviewRename={() => onPreviewRename(item)}
-              onApplyRename={() => onApplyRename(item)}
+              onRename={() => onRename(item)}
               onSearchSubtitle={() => onSearchSubtitle(item)}
             />
           ))}
           {items.length === 0 ? (
             <tr>
-              <td colSpan={6} className="empty">
+              <td colSpan={7} className="empty">
                 未发现视频
               </td>
             </tr>
@@ -565,79 +684,208 @@ function MediaTable({
 
 function Row({
   item,
-  candidates,
-  preview,
   busy,
+  showMetadata,
   onSearch,
-  onApplyMetadata,
-  onPreviewRename,
-  onApplyRename,
+  onRename,
   onSearchSubtitle,
 }: {
   item: MediaItem;
-  candidates: Candidate[];
-  preview?: RenamePreview;
   busy: string | null;
+  showMetadata: boolean;
   onSearch: () => void;
-  onApplyMetadata: (candidate: Candidate) => void;
-  onPreviewRename: () => void;
-  onApplyRename: () => void;
+  onRename: () => void;
   onSearchSubtitle: () => void;
 }) {
   return (
-    <>
-      <tr>
-        <td>{item.year ? `${item.title} (${item.year})` : item.title}</td>
-        <td>{item.kind}</td>
-        <td>{item.season && item.episode ? `S${pad(item.season)}E${pad(item.episode)}` : "-"}</td>
-        <td className={item.has_nfo ? "good" : "warn"}>{item.has_nfo ? "已有" : "缺失"}</td>
-        <td className="path">{item.path}</td>
-        <td>
-          <div className="actions">
-            <button type="button" onClick={onSearch} disabled={busy === `search:${item.id}`}>
+    <tr>
+      <td>{item.year ? `${item.title} (${item.year})` : item.title}</td>
+      <td>{item.kind}</td>
+      <td>{item.season && item.episode ? `S${pad(item.season)}E${pad(item.episode)}` : "-"}</td>
+      <td className={item.has_nfo ? "good" : "warn"}>{item.has_nfo ? "已有" : "缺失"}</td>
+      <td>
+        <SubtitleTags subtitles={item.subtitles ?? []} />
+      </td>
+      <td className="path">{relativeLibraryPath(item.path, item.library_path)}</td>
+      <td>
+        <div className="actions">
+          {showMetadata ? (
+            <button type="button" onClick={onSearch} disabled={busy === `metadata-search:${item.id}`}>
               刮削
             </button>
-            <button type="button" onClick={onPreviewRename} disabled={busy === `preview:${item.id}`}>
-              预览改名
-            </button>
-            <button type="button" onClick={onApplyRename} disabled={!preview?.can_apply || busy === `rename:${item.id}`}>
-              执行改名
-            </button>
-            <button type="button" onClick={onSearchSubtitle} disabled={busy === `subtitle-search:${item.id}`}>
-              字幕
-            </button>
+          ) : null}
+          <button type="button" onClick={onRename} disabled={busy === `preview:${item.id}` || busy === `rename:${item.id}`}>
+            自动重命名
+          </button>
+          <button type="button" onClick={onSearchSubtitle} disabled={busy === `subtitle-search:${item.id}`}>
+            字幕
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+function SubtitleTags({ subtitles }: { subtitles: string[] }) {
+  if (subtitles.length === 0) {
+    return (
+      <div className="subtitle-tags">
+        <span className="subtitle-tag muted">无字幕</span>
+      </div>
+    );
+  }
+  const languages = subtitleLanguages(subtitles);
+  return (
+    <div className="subtitle-tags">
+      <span className="subtitle-tag good">有字幕</span>
+      {languages.map((language) => (
+        <span key={language} className="subtitle-tag">
+          {language}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function RenameDialogView({
+  dialog,
+  busy,
+  onApply,
+  onClose,
+}: {
+  dialog: RenameDialog;
+  busy: string | null;
+  onApply: (dialog: RenameDialog) => void;
+  onClose: () => void;
+}) {
+  const previewing = busy === `preview:${dialog.item.id}`;
+  const renaming = busy === `rename:${dialog.item.id}`;
+  const preview = dialog.preview;
+  const changes = preview ? renameChanges(preview) : [];
+  const hasChanges = changes.length > 0;
+  const canApply = Boolean(preview?.can_apply && hasChanges && !previewing && !renaming);
+
+  return (
+    <div className="dialog-backdrop">
+      <section className="dialog" role="dialog" aria-modal="true" aria-label="自动重命名">
+        <button type="button" className="dialog-close" onClick={onClose} aria-label="关闭">
+          X
+        </button>
+        <div className="section-head">
+          <div>
+            <h2>自动重命名</h2>
+            <p className="path">{relativeLibraryPath(dialog.item.path, dialog.item.library_path)}</p>
           </div>
-        </td>
-      </tr>
-      {candidates.length > 0 ? (
-        <tr>
-          <td colSpan={6}>
-            <div className="inline-list">
-              {candidates.map((candidate) => (
-                <button key={candidate.id} type="button" className="candidate" onClick={() => onApplyMetadata(candidate)}>
-                  <strong>{candidate.year ? `${candidate.title} (${candidate.year})` : candidate.title}</strong>
-                  <span>{candidate.overview || "无简介"}</span>
-                </button>
-              ))}
-            </div>
-          </td>
-        </tr>
-      ) : null}
-      {preview ? (
-        <tr>
-          <td colSpan={6}>
-            <div className={preview.can_apply ? "preview" : "preview blocked"}>
-              {preview.conflicts.length > 0 ? <p>冲突：{preview.conflicts.join(", ")}</p> : null}
-              {preview.changes.map((change) => (
-                <p className="path" key={`${change.from}:${change.to}`}>
-                  {change.from} → {change.to}
-                </p>
-              ))}
-            </div>
-          </td>
-        </tr>
-      ) : null}
-    </>
+        </div>
+        {previewing ? <p className="empty">正在生成改名预览...</p> : null}
+        {dialog.error ? <p className="notice error">{dialog.error}</p> : null}
+        {preview ? (
+          <div className={preview.can_apply ? "preview" : "preview blocked"}>
+            {preview.conflicts.length > 0 ? <p>冲突：{preview.conflicts.join(", ")}</p> : null}
+            {!hasChanges && preview.conflicts.length === 0 ? <p>已经是规范的名称，不需要再修改。</p> : null}
+            {hasChanges
+              ? changes.map((change) => (
+                  <RenameChangePreview key={`${change.from}:${change.to}`} change={change} libraryPath={dialog.item.library_path} />
+                ))
+              : null}
+          </div>
+        ) : null}
+        <div className="dialog-actions">
+          {hasChanges ? (
+            <button type="button" onClick={() => onApply(dialog)} disabled={!canApply}>
+              {renaming ? "重命名中" : "确定"}
+            </button>
+          ) : null}
+          <button type="button" className="link-button" onClick={onClose}>
+            取消
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function RenameChangePreview({ change, libraryPath }: { change: { from: string; to: string }; libraryPath: string }) {
+  const diff = filenameDiff(baseName(change.from), baseName(change.to));
+  return (
+    <div className="rename-change">
+      <p className="rename-file-line before">
+        <span className="rename-label">修改前</span>
+        <code className="rename-file">{renderDiffText(diff.from)}</code>
+      </p>
+      <p className="rename-file-line after">
+        <span className="rename-label">修改后</span>
+        <code className="rename-file">{renderDiffText(diff.to)}</code>
+      </p>
+      <p className="rename-path path">
+        {relativeLibraryPath(change.from, libraryPath)} → {relativeLibraryPath(change.to, libraryPath)}
+      </p>
+    </div>
+  );
+}
+
+function MetadataDialogView({
+  dialog,
+  busy,
+  onChange,
+  onSearch,
+  onApply,
+  onClose,
+}: {
+  dialog: MetadataDialog;
+  busy: string | null;
+  onChange: (dialog: MetadataDialog) => void;
+  onSearch: (dialog: MetadataDialog) => void;
+  onApply: (dialog: MetadataDialog) => void;
+  onClose: () => void;
+}) {
+  const searching = busy === `metadata-search:${dialog.item.id}`;
+  const applying = busy === `metadata:${dialog.item.id}`;
+
+  return (
+    <div className="dialog-backdrop">
+      <section className="dialog" role="dialog" aria-modal="true" aria-label="刮削元数据">
+        <button type="button" className="dialog-close" onClick={onClose} aria-label="关闭">
+          X
+        </button>
+        <div className="section-head">
+          <div>
+            <h2>刮削元数据</h2>
+            <p className="path">{relativeLibraryPath(dialog.item.path, dialog.item.library_path)}</p>
+          </div>
+        </div>
+        <div className="subtitle-form">
+          <input value={dialog.query} onChange={(event) => onChange({ ...dialog, query: event.target.value })} aria-label="元数据匹配关键字" />
+          <button type="button" onClick={() => onSearch(dialog)} disabled={searching}>
+            {searching ? "匹配中" : "重新匹配"}
+          </button>
+        </div>
+        {dialog.error ? <p className="notice error">{dialog.error}</p> : null}
+        <div className="subtitle-results">
+          {dialog.results.map((candidate) => (
+            <button
+              key={candidate.id}
+              type="button"
+              className={candidate.id === dialog.selectedId ? "subtitle-candidate selected" : "subtitle-candidate"}
+              onClick={() => onChange({ ...dialog, selectedId: candidate.id })}
+            >
+              <strong>{candidate.year ? `${candidate.title} (${candidate.year})` : candidate.title}</strong>
+              <small>{candidate.media_type}</small>
+              <span>{candidate.overview || "无简介"}</span>
+            </button>
+          ))}
+          {dialog.results.length === 0 && !searching ? <p className="empty">暂无候选</p> : null}
+        </div>
+        <div className="dialog-actions">
+          <button type="button" onClick={() => onApply(dialog)} disabled={dialog.selectedId === undefined || searching || applying}>
+            {applying ? "写入中" : "确定"}
+          </button>
+          <button type="button" className="link-button" onClick={onClose}>
+            取消
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -662,14 +910,14 @@ function SubtitleDialogView({
   return (
     <div className="dialog-backdrop">
       <section className="dialog" role="dialog" aria-modal="true" aria-label="搜索字幕">
+        <button type="button" className="dialog-close" onClick={onClose} aria-label="关闭">
+          X
+        </button>
         <div className="section-head">
           <div>
             <h2>搜索字幕</h2>
-            <p className="path">{dialog.item.path}</p>
+            <p className="path">{relativeLibraryPath(dialog.item.path, dialog.item.library_path)}</p>
           </div>
-          <button type="button" className="link-button" onClick={onClose}>
-            关闭
-          </button>
         </div>
         <div className="subtitle-form">
           <input value={dialog.query} onChange={(event) => onChange({ ...dialog, query: event.target.value })} aria-label="字幕搜索关键词" />
@@ -696,6 +944,9 @@ function SubtitleDialogView({
         <div className="dialog-actions">
           <button type="button" onClick={() => onDownload(dialog)} disabled={dialog.selectedId === undefined || searching || downloading}>
             {downloading ? "下载中" : "下载字幕"}
+          </button>
+          <button type="button" className="link-button" onClick={onClose}>
+            取消
           </button>
         </div>
       </section>
@@ -739,9 +990,135 @@ function pad(value: number) {
 }
 
 function videoStem(path: string) {
-  const name = path.split(/[\\/]/).pop() ?? path;
+  const name = baseName(path);
   const dot = name.lastIndexOf(".");
   return dot > 0 ? name.slice(0, dot) : name;
+}
+
+function baseName(path: string) {
+  return path.split(/[\\/]/).pop() ?? path;
+}
+
+function filenameDiff(from: string, to: string) {
+  let prefixLength = 0;
+  while (prefixLength < from.length && prefixLength < to.length && from[prefixLength] === to[prefixLength]) {
+    prefixLength += 1;
+  }
+  let fromSuffix = from.length;
+  let toSuffix = to.length;
+  while (fromSuffix > prefixLength && toSuffix > prefixLength && from[fromSuffix - 1] === to[toSuffix - 1]) {
+    fromSuffix -= 1;
+    toSuffix -= 1;
+  }
+  return {
+    from: { prefix: from.slice(0, prefixLength), diff: from.slice(prefixLength, fromSuffix), suffix: from.slice(fromSuffix) },
+    to: { prefix: to.slice(0, prefixLength), diff: to.slice(prefixLength, toSuffix), suffix: to.slice(toSuffix) },
+  };
+}
+
+function renderDiffText(part: { prefix: string; diff: string; suffix: string }) {
+  return (
+    <>
+      {part.prefix}
+      {part.diff ? <mark className="rename-diff">{part.diff}</mark> : null}
+      {part.suffix}
+    </>
+  );
+}
+
+function groupSeriesSeasons(items: MediaItem[]) {
+  const seasons = new Map<string, SeasonSummary>();
+  for (const item of items) {
+    const seasonNumber = item.season ?? 1;
+    const key = [item.title, item.year ?? "", seasonNumber].join("\u0000");
+    const current = seasons.get(key);
+    if (current) {
+      current.items.push(item);
+      current.subtitles.push(...(item.subtitles ?? []));
+      current.missingNfo += item.has_nfo ? 0 : 1;
+      continue;
+    }
+    seasons.set(key, {
+      key,
+      title: item.title,
+      year: item.year,
+      season: seasonNumber,
+      items: [item],
+      representative: item,
+      path: dirname(item.path),
+      subtitles: [...(item.subtitles ?? [])],
+      missingNfo: item.has_nfo ? 0 : 1,
+    });
+  }
+  return [...seasons.values()].sort((left, right) => mediaTitle(left).localeCompare(mediaTitle(right), "zh-CN") || left.season - right.season);
+}
+
+function mediaTitle(item: Pick<MediaItem, "title" | "year">) {
+  return item.year ? `${item.title} (${item.year})` : item.title;
+}
+
+function seasonNfoLabel(season: SeasonSummary) {
+  if (season.missingNfo === 0) {
+    return "已有";
+  }
+  if (season.missingNfo === season.items.length) {
+    return "缺失";
+  }
+  return `${season.items.length - season.missingNfo}/${season.items.length}`;
+}
+
+function dirname(path: string) {
+  const normalized = path.replaceAll("\\", "/");
+  const index = normalized.lastIndexOf("/");
+  return index > 0 ? normalized.slice(0, index) : path;
+}
+
+function subtitleLanguages(subtitles: string[]) {
+  const languageByToken: Record<string, string> = {
+    zh: "中文",
+    cn: "中文",
+    chs: "简中",
+    sc: "简中",
+    cht: "繁中",
+    tc: "繁中",
+    en: "英文",
+    eng: "英文",
+    ja: "日文",
+    jpn: "日文",
+    jp: "日文",
+    ko: "韩文",
+    kr: "韩文",
+    kor: "韩文",
+  };
+  const languages = new Set<string>();
+  for (const subtitle of subtitles) {
+    const tokens = videoStem(subtitle).toLowerCase().split(/[ ._\-[\]()]+/).filter(Boolean);
+    for (const token of tokens) {
+      const language = languageByToken[token];
+      if (language) {
+        languages.add(language);
+      }
+    }
+  }
+  return languages.size > 0 ? [...languages].sort() : ["未知语言"];
+}
+
+function relativeLibraryPath(path: string, libraryPath: string) {
+  const normalizedPath = path.replaceAll("\\", "/");
+  const normalizedRoot = libraryPath.replaceAll("\\", "/").replace(/\/+$/, "");
+  if (normalizedPath === normalizedRoot) {
+    return ".";
+  }
+  const prefix = `${normalizedRoot}/`;
+  return normalizedPath.startsWith(prefix) ? normalizedPath.slice(prefix.length) : path;
+}
+
+function renameChanges(preview: RenamePreview) {
+  return preview.changes.filter((change) => change.from !== change.to);
+}
+
+function hasRenameChanges(preview: RenamePreview) {
+  return renameChanges(preview).length > 0;
 }
 
 function parseHash(): View {

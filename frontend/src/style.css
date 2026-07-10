@@ -266,31 +266,34 @@ th {
   min-width: 86px;
 }
 
-.inline-list {
-  display: grid;
-  gap: 8px;
+.subtitle-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 98px;
 }
 
-.candidate {
-  display: block;
-  width: 100%;
-  min-height: 0;
-  padding: 10px;
-  border-color: #c9d4d8;
+.subtitle-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 2px 8px;
+  border: 1px solid #c9d4d8;
+  border-radius: 999px;
   background: #f8fbfc;
-  color: #1f2933;
-  text-align: left;
-}
-
-.candidate strong,
-.candidate span {
-  display: block;
-}
-
-.candidate span {
-  margin-top: 4px;
   color: #52616b;
-  font-size: 13px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.subtitle-tag.good {
+  border-color: #b7d8ce;
+  background: #f0fdf8;
+  color: #157347;
+}
+
+.subtitle-tag.muted {
+  color: #7b8790;
 }
 
 .preview {
@@ -311,6 +314,56 @@ th {
   margin: 0;
 }
 
+.rename-change {
+  display: grid;
+  gap: 6px;
+  padding: 8px 0;
+  border-top: 1px solid #b7d8ce;
+}
+
+.rename-change:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.rename-file-line {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+}
+
+.rename-label {
+  color: #52616b;
+  font-size: 12px;
+}
+
+.rename-file {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+}
+
+.rename-diff {
+  border-radius: 4px;
+  padding: 1px 3px;
+  color: inherit;
+}
+
+.rename-file-line.before .rename-diff {
+  background: #fee2e2;
+}
+
+.rename-file-line.after .rename-diff {
+  background: #bbf7d0;
+}
+
+.rename-path {
+  color: #52616b;
+  font-size: 12px;
+}
+
 .dialog-backdrop {
   position: fixed;
   inset: 0;
@@ -321,6 +374,7 @@ th {
 }
 
 .dialog {
+  position: relative;
   width: min(760px, 100%);
   max-height: calc(100vh - 48px);
   overflow: auto;
@@ -328,6 +382,22 @@ th {
   border-radius: 8px;
   background: #fff;
   padding: 16px;
+}
+
+.dialog-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  border-color: #c9d4d8;
+  background: #fff;
+  color: #1f2933;
+}
+
+.dialog .section-head {
+  padding-right: 44px;
 }
 
 .subtitle-form {
@@ -374,6 +444,7 @@ th {
 
 .dialog-actions {
   display: flex;
+  gap: 10px;
   justify-content: flex-end;
   margin-top: 14px;
 }

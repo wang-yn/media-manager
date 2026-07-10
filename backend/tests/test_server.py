@@ -140,6 +140,54 @@ token = "test-assrt-token"
         self.assertEqual(response.json()["assrt"], "configured")
         self.assertNotIn("test-assrt-token", str(response.json()))
 
+    def test_search_metadata_accepts_query_override_and_blank_fallback(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            media_root = root / "media"
+            config_path = root / "config.toml"
+            movie = media_root / "movies" / "Dune (2021)" / "Dune (2021).mkv"
+            movie.parent.mkdir(parents=True)
+            movie.write_text("", encoding="utf-8")
+            config_path.write_text(
+                f"""
+[paths]
+media_dir = "{media_root}"
+
+[tmdb]
+api_key = "token"
+
+[[libraries]]
+name = "Movies"
+kind = "movie"
+path = "{media_root / "movies"}"
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
+            from media_manager.server import create_app
+
+            client = TestClient(create_app())
+            media_id = client.get("/api/media").json()["items"][0]["id"]
+
+            class FakeTMDBClient:
+                queries: list[str] = []
+
+                def __init__(self, api_key):
+                    pass
+
+                def search(self, query, media_type, year):
+                    self.__class__.queries.append(query)
+                    return [{"id": 1, "title": query, "media_type": media_type}]
+
+            with patch("media_manager.server.TMDBClient", FakeTMDBClient):
+                override = client.post(f"/api/media/{media_id}/metadata/search", json={"query": "沙丘"})
+                fallback = client.post(f"/api/media/{media_id}/metadata/search", json={"query": "   "})
+
+        self.assertEqual(override.status_code, 200)
+        self.assertEqual(fallback.status_code, 200)
+        self.assertEqual(FakeTMDBClient.queries, ["沙丘", "Dune"])
+
     def test_search_subtitles_uses_video_stem_by_default(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
