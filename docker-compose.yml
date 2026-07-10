@@ -4,6 +4,8 @@ services:
     container_name: media-manager
     environment:
       - TZ=Asia/Shanghai
+      - MEDIA_MANAGER_HOST=0.0.0.0
+      - MEDIA_MANAGER_PORT=8000
       - TMDB_API_KEY=${TMDB_API_KEY:-}
       - ASSRT_API_TOKEN=${ASSRT_API_TOKEN:-}
     volumes:

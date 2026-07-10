@@ -9,6 +9,8 @@ FROM python:3.13-alpine
 WORKDIR /app
 ENV PYTHONPATH=/app/backend/src
 ENV MEDIA_MANAGER_STATIC_DIR=/app/static
+ENV MEDIA_MANAGER_HOST=0.0.0.0
+ENV MEDIA_MANAGER_PORT=8000
 COPY backend/ ./backend/
 COPY config/ ./config/
 RUN pip install --no-cache-dir ./backend

@@ -62,12 +62,31 @@ docker build -t media-manager:local .
 docker run -d \
   --name media-manager \
   -p 8000:8000 \
+  -e MEDIA_MANAGER_HOST=0.0.0.0 \
+  -e MEDIA_MANAGER_PORT=8000 \
   -e TMDB_API_KEY=你的_TMDB_API_KEY \
   -e ASSRT_API_TOKEN=你的_ASSRT_API_TOKEN \
   -v "$PWD/config:/config" \
   -v "$PWD/media:/media" \
   --restart unless-stopped \
   media-manager:local
+```
+
+使用已发布镜像：
+
+```bash
+docker pull ghcr.io/wang-yn/media-manager:v1.0.1
+docker run -d \
+  --name media-manager \
+  -p 8000:8000 \
+  -e MEDIA_MANAGER_HOST=0.0.0.0 \
+  -e MEDIA_MANAGER_PORT=8000 \
+  -e TMDB_API_KEY=你的_TMDB_API_KEY \
+  -e ASSRT_API_TOKEN=你的_ASSRT_API_TOKEN \
+  -v "$PWD/config:/config" \
+  -v "$PWD/media:/media" \
+  --restart unless-stopped \
+  ghcr.io/wang-yn/media-manager:v1.0.1
 ```
 
 访问 `http://localhost:8000`。检查状态：
@@ -109,6 +128,8 @@ docker compose down
 ```
 
 启动后访问 `http://localhost:8000`。如果不需要字幕下载，可以不设置 `ASSRT_API_TOKEN`；如果不需要 TMDB 元数据刮削，可以不设置 `TMDB_API_KEY`。
+
+注意：Docker 容器内的媒体路径必须使用容器路径，例如 `/media/movies`、`/media/tv`，不要写宿主机绝对路径。容器需要监听 `0.0.0.0:8000`；如果复用本地开发的 `config/config.toml`，请保留上面的 `MEDIA_MANAGER_HOST` 和 `MEDIA_MANAGER_PORT` 环境变量覆盖。
 
 ## API
 
