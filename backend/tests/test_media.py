@@ -5,7 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from media_manager.media import scan_libraries
+from media_manager.media import MediaItem, scan_libraries
 
 
 @dataclass(frozen=True)
@@ -52,6 +52,58 @@ class ScanLibrariesTest(unittest.TestCase):
         self.assertEqual(items[1].nfo_path, str(episode.with_suffix(".nfo")))
         self.assertFalse(items[0].has_nfo)
         self.assertFalse(items[1].has_nfo)
+        self.assertFalse(items[0].has_metadata)
+        self.assertFalse(items[1].has_metadata)
+
+    def test_marks_movie_and_series_media_metadata(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            movie = root / "movies" / "Dune (2021)" / "Dune (2021).mkv"
+            episode = root / "tv" / "Pantheon (2022)" / "Season 01" / "Pantheon - S01E03.mkv"
+            movie_nfo = movie.parent / "movie.nfo"
+            series_nfo = root / "tv" / "Pantheon (2022)" / "tvshow.nfo"
+            movie.parent.mkdir(parents=True)
+            episode.parent.mkdir(parents=True)
+            movie.write_text("", encoding="utf-8")
+            episode.write_text("", encoding="utf-8")
+            movie_nfo.write_text("<movie />", encoding="utf-8")
+            series_nfo.write_text("<tvshow />", encoding="utf-8")
+
+            items = scan_libraries(
+                [
+                    Library("Movies", "movie", root / "movies"),
+                    Library("TV", "series", root / "tv"),
+                ]
+            )
+
+        movie_item, series_item = items
+        self.assertTrue(movie_item.has_metadata)
+        self.assertTrue(series_item.has_metadata)
+        self.assertTrue(movie_item.has_nfo)
+        self.assertFalse(series_item.has_nfo)
+        self.assertTrue(movie_item.to_dict()["has_metadata"])
+        self.assertTrue(series_item.to_dict()["has_metadata"])
+
+    def test_series_metadata_falls_back_when_library_relative_path_has_no_show(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            library = root / "configured-tv-library"
+            video = root / "other" / "Pantheon (2022)" / "Season 01" / "Pantheon - S01E03.mkv"
+            fallback_nfo = video.parents[1] / "tvshow.nfo"
+            library.mkdir(parents=True)
+            video.parent.mkdir(parents=True)
+            video.write_text("", encoding="utf-8")
+            fallback_nfo.write_text("<tvshow />", encoding="utf-8")
+
+            item = MediaItem(
+                kind="series",
+                title="Pantheon",
+                path=str(video),
+                library="TV",
+                library_path=str(library),
+            )
+
+        self.assertTrue(item.has_metadata)
 
     def test_marks_existing_nfo(self) -> None:
         with TemporaryDirectory() as tmp:

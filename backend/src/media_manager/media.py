@@ -43,6 +43,7 @@ class MediaItem:
     subtitles: list[str] | None = None
     nfo_path: str | None = None
     has_nfo: bool = False
+    has_metadata: bool = False
     directory_size_bytes: int = 0
     id: str = ""
 
@@ -52,6 +53,8 @@ class MediaItem:
         if self.nfo_path is None:
             object.__setattr__(self, "nfo_path", str(_nfo_path(self)))
         object.__setattr__(self, "has_nfo", bool(self.nfo_path and Path(self.nfo_path).exists()))
+        metadata_path = _metadata_path(self)
+        object.__setattr__(self, "has_metadata", bool(metadata_path and metadata_path.exists()))
 
     def to_dict(self) -> dict[str, object]:
         data = asdict(self)
@@ -182,3 +185,17 @@ def _nfo_path(item: MediaItem) -> Path:
     if item.kind == "movie":
         return video.parent / "movie.nfo"
     return video.with_suffix(".nfo")
+
+
+def _metadata_path(item: MediaItem) -> Path | None:
+    video = Path(item.path)
+    if item.kind == "movie":
+        return video.parent / "movie.nfo"
+    if item.kind != "series":
+        return None
+    library = Path(item.library_path)
+    try:
+        show_name = video.relative_to(library).parts[0]
+    except (ValueError, IndexError):
+        return video.parents[1] / "tvshow.nfo"
+    return library / show_name / "tvshow.nfo"
