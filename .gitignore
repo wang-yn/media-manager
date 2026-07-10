@@ -15,3 +15,4 @@ dist/
 /config/config.toml
 /media/*
 !/media/.gitkeep
+.tmp/
