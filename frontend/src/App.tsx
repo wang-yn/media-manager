@@ -78,6 +78,16 @@ type RenameDialog = {
   error?: string;
 };
 
+type BatchRenameEntry = {
+  target: BatchTarget;
+  preview?: RenamePreview;
+  error?: string;
+};
+
+type BatchRenameDialog = {
+  entries: BatchRenameEntry[];
+};
+
 type FilesDialog = {
   item: MediaItem;
   rootPath?: string;
@@ -168,17 +178,20 @@ export default function App() {
   const [media, setMedia] = useState<MediaResponse>(emptyMedia);
   const [form, setForm] = useState<Library>({ name: "", kind: "movie", path: "" });
   const [renameDialog, setRenameDialog] = useState<RenameDialog | null>(null);
+  const [batchRenameDialog, setBatchRenameDialog] = useState<BatchRenameDialog | null>(null);
   const [metadataDialog, setMetadataDialog] = useState<MetadataDialog | null>(null);
   const [subtitleDialog, setSubtitleDialog] = useState<SubtitleDialog | null>(null);
   const [guidedBatch, setGuidedBatch] = useState<GuidedBatch | null>(null);
   const [batchSummary, setBatchSummary] = useState<BatchSummary | null>(null);
   const [filesDialog, setFilesDialog] = useState<FilesDialog | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [batchRenameApplying, setBatchRenameApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const metadataSearchId = useRef(0);
   const subtitleSearchId = useRef(0);
   const guidedBatchRef = useRef<GuidedBatch | null>(null);
   const guidedBatchRunId = useRef(0);
+  const batchRenameApplyingRef = useRef(false);
 
   function setGuidedBatchState(next: GuidedBatch | null) {
     guidedBatchRef.current = next;
@@ -320,6 +333,74 @@ export default function App() {
     }
   }
 
+  async function openBatchRenameDialog(targets: BatchTarget[]) {
+    if (targets.length === 0) {
+      return;
+    }
+    const busyKey = "batch-rename-preview";
+    setBusy(busyKey);
+    setError(null);
+    const entries = await Promise.all(
+      targets.map(async (target) => {
+        const url = isSeriesBatchTarget(target) ? `/api/media/${target.item.id}/rename/batch/preview` : `/api/media/${target.item.id}/rename/preview`;
+        try {
+          const preview = await request<RenamePreview>(url, { method: "POST" });
+          return { target, preview };
+        } catch (err) {
+          return { target, error: messageFrom(err) };
+        }
+      }),
+    );
+    setBatchRenameDialog({ entries: markDuplicateRenameTargets(entries) });
+    setBusy((current) => (current === busyKey ? null : current));
+  }
+
+  async function applyBatchRename(dialog: BatchRenameDialog) {
+    if (batchRenameApplyingRef.current) {
+      return;
+    }
+    const busyKey = "batch-rename-apply";
+    const results: BatchResult[] = [];
+    batchRenameApplyingRef.current = true;
+    setBatchRenameApplying(true);
+    setBusy(busyKey);
+    setError(null);
+    try {
+      for (const entry of dialog.entries) {
+        const label = mediaTitle(entry.target.item);
+        const changes = entry.preview ? renameChanges(entry.preview) : [];
+        if (entry.error) {
+          results.push({ label, status: "failed", error: entry.error });
+          continue;
+        }
+        if (!entry.preview?.can_apply) {
+          results.push({ label, status: "failed", error: entry.preview?.conflicts.join(", ") || "重命名存在冲突" });
+          continue;
+        }
+        if (changes.length === 0) {
+          results.push({ label, status: "skipped" });
+          continue;
+        }
+        const url = isSeriesBatchTarget(entry.target) ? `/api/media/${entry.target.item.id}/rename/batch` : `/api/media/${entry.target.item.id}/rename/apply`;
+        try {
+          await request(url, { method: "POST" });
+          results.push({ label, status: "success" });
+        } catch (err) {
+          results.push({ label, status: "failed", error: messageFrom(err) });
+        }
+      }
+      setBatchRenameDialog(null);
+      setBatchSummary({ title: "批量重命名结果", results });
+      await refreshContent();
+    } catch (err) {
+      setError(messageFrom(err));
+    } finally {
+      batchRenameApplyingRef.current = false;
+      setBatchRenameApplying(false);
+      setBusy((current) => (current === busyKey ? null : current));
+    }
+  }
+
   function openSubtitleDialog(item: MediaItem) {
     const dialog = { item, query: videoStem(item.path), results: [] };
     setSubtitleDialog(dialog);
@@ -407,24 +488,6 @@ export default function App() {
       );
     } catch (err) {
       setFilesDialog((current) => (current?.item.id === item.id ? { ...current, error: messageFrom(err) } : current));
-    } finally {
-      setBusy((current) => (current === busyKey ? null : current));
-    }
-  }
-
-  async function batchRenameSeries(item: MediaItem) {
-    const path = seriesDirectoryPath(item);
-    if (!window.confirm(`确定批量重命名 ${relativeLibraryPath(path, item.library_path)} 下的所有分集？`)) {
-      return;
-    }
-    const busyKey = `batch-rename:${item.id}`;
-    setBusy(busyKey);
-    setError(null);
-    try {
-      await request<{ changes: Array<{ from: string; to: string }> }>(`/api/media/${item.id}/rename/batch`, { method: "POST" });
-      await refreshContent();
-    } catch (err) {
-      setError(messageFrom(err));
     } finally {
       setBusy((current) => (current === busyKey ? null : current));
     }
@@ -552,7 +615,7 @@ export default function App() {
           <span className="brand-title">影视媒体库工作台</span>
         </button>
         <div className="top-actions">
-          <button type="button" onClick={refresh} disabled={busy === "refresh"}>
+          <button type="button" onClick={refresh} disabled={busy === "refresh" || batchRenameApplying}>
             {busy === "refresh" ? "刷新中" : "刷新"}
           </button>
           <button type="button" onClick={() => setHash({ name: "settings" })}>
@@ -577,7 +640,7 @@ export default function App() {
           onSearchSubtitle={openSubtitleDialog}
           onDeleteSeries={deleteSeries}
           onShowFiles={openFilesDialog}
-          onBatchRenameSeries={batchRenameSeries}
+          onBatchRename={openBatchRenameDialog}
           onBatchMetadata={startMetadataBatch}
           onBatchSubtitles={startSubtitleBatch}
         />
@@ -600,6 +663,10 @@ export default function App() {
 
       {renameDialog ? (
         <RenameDialogView dialog={renameDialog} busy={busy} onApply={applyRename} onClose={() => setRenameDialog(null)} />
+      ) : null}
+
+      {batchRenameDialog ? (
+        <BatchRenameDialogView dialog={batchRenameDialog} applying={batchRenameApplying} onApply={applyBatchRename} onClose={() => setBatchRenameDialog(null)} />
       ) : null}
 
       {subtitleDialog ? (
@@ -739,7 +806,7 @@ function LibraryDetailView({
   onSearchSubtitle,
   onDeleteSeries,
   onShowFiles,
-  onBatchRenameSeries,
+  onBatchRename,
   onBatchMetadata,
   onBatchSubtitles,
 }: {
@@ -751,7 +818,7 @@ function LibraryDetailView({
   onSearchSubtitle: (item: MediaItem) => void;
   onDeleteSeries: (item: MediaItem) => void;
   onShowFiles: (item: MediaItem) => void;
-  onBatchRenameSeries: (item: MediaItem) => void;
+  onBatchRename: (targets: BatchTarget[]) => void;
   onBatchMetadata: (targets: BatchTarget[]) => void;
   onBatchSubtitles: (targets: BatchTarget[]) => void;
 }) {
@@ -805,8 +872,12 @@ function LibraryDetailView({
         </div>
         {selectedSeries ? (
           <div className="top-actions">
-            <button type="button" onClick={() => onBatchRenameSeries(selectedSeries.representative)} disabled={busy === `batch-rename:${selectedSeries.representative.id}`}>
-              {busy === `batch-rename:${selectedSeries.representative.id}` ? "重命名中" : "批量重命名"}
+            <button
+              type="button"
+              onClick={() => onBatchRename([{ key: selectedSeries.key, item: selectedSeries.representative, items: selectedSeries.items }])}
+              disabled={busy === "batch-rename-preview"}
+            >
+              {busy === "batch-rename-preview" ? "生成预览中" : "批量重命名"}
             </button>
             <button type="button" className="link-button" onClick={() => setSelectedSeriesKey(null)}>
               返回剧集列表
@@ -834,6 +905,9 @@ function LibraryDetailView({
             </button>
             <button type="button" onClick={() => onBatchSubtitles(selectedTargets)} disabled={selectedTargets.length === 0}>
               批量字幕
+            </button>
+            <button type="button" onClick={() => onBatchRename(selectedTargets)} disabled={selectedTargets.length === 0 || busy === "batch-rename-preview"}>
+              {busy === "batch-rename-preview" ? "生成预览中" : "批量重命名"}
             </button>
           </div>
         </>
@@ -1173,6 +1247,62 @@ function RenameDialogView({
             </button>
           ) : null}
           <button type="button" className="link-button" onClick={onClose}>
+            取消
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function BatchRenameDialogView({
+  dialog,
+  applying,
+  onApply,
+  onClose,
+}: {
+  dialog: BatchRenameDialog;
+  applying: boolean;
+  onApply: (dialog: BatchRenameDialog) => void;
+  onClose: () => void;
+}) {
+  const executable = dialog.entries.some((entry) => Boolean(entry.preview?.can_apply && hasRenameChanges(entry.preview)));
+
+  return (
+    <div className="dialog-backdrop">
+      <section className="dialog batch-rename-dialog" role="dialog" aria-modal="true" aria-label="批量重命名预览">
+        <button type="button" className="dialog-close" onClick={onClose} aria-label="关闭" disabled={applying}>
+          X
+        </button>
+        <div className="section-head">
+          <h2>批量重命名预览</h2>
+        </div>
+        <div className="batch-rename-groups">
+          {dialog.entries.map((entry) => {
+            const preview = entry.preview;
+            const changes = preview ? renameChanges(preview) : [];
+            return (
+              <section className="batch-rename-group" key={entry.target.key}>
+                <h3>{mediaTitle(entry.target.item)}</h3>
+                {entry.error ? <p className="notice error">{entry.error}</p> : null}
+                {preview ? (
+                  <div className={preview.can_apply ? "preview" : "preview blocked"}>
+                    {preview.conflicts.length > 0 ? <p>冲突：{preview.conflicts.join(", ")}</p> : null}
+                    {changes.length === 0 && preview.conflicts.length === 0 ? <p>已经是规范名称，无需修改。</p> : null}
+                    {changes.map((change) => (
+                      <RenameChangePreview key={`${change.from}:${change.to}`} change={change} libraryPath={entry.target.item.library_path} />
+                    ))}
+                  </div>
+                ) : null}
+              </section>
+            );
+          })}
+        </div>
+        <div className="dialog-actions">
+          <button type="button" onClick={() => onApply(dialog)} disabled={!executable || applying}>
+            {applying ? "重命名中" : "确定"}
+          </button>
+          <button type="button" className="link-button" onClick={onClose} disabled={applying}>
             取消
           </button>
         </div>
@@ -1690,6 +1820,46 @@ function seriesDirectoryPath(item: MediaItem) {
   const relative = relativeLibraryPath(item.path, item.library_path).replaceAll("\\", "/");
   const showDirectory = relative.split("/")[0];
   return `${item.library_path.replace(/[/\\]+$/, "")}/${showDirectory}`;
+}
+
+function isSeriesBatchTarget(target: BatchTarget) {
+  return target.item.kind === "series";
+}
+
+function markDuplicateRenameTargets(entries: BatchRenameEntry[]) {
+  const indexesByTarget = new Map<string, Set<number>>();
+  entries.forEach((entry, index) => {
+    if (!entry.preview || entry.error) {
+      return;
+    }
+    for (const change of new Set(renameChanges(entry.preview).map((item) => item.to))) {
+      const indexes = indexesByTarget.get(change) ?? new Set<number>();
+      indexes.add(index);
+      indexesByTarget.set(change, indexes);
+    }
+  });
+  const duplicateIndexes = new Set<number>();
+  for (const indexes of indexesByTarget.values()) {
+    if (indexes.size > 1) {
+      indexes.forEach((index) => duplicateIndexes.add(index));
+    }
+  }
+  if (duplicateIndexes.size === 0) {
+    return entries;
+  }
+  return entries.map((entry, index) => {
+    if (!entry.preview || !duplicateIndexes.has(index)) {
+      return entry;
+    }
+    return {
+      ...entry,
+      preview: {
+        ...entry.preview,
+        can_apply: false,
+        conflicts: [...new Set([...entry.preview.conflicts, "duplicate_target"])],
+      },
+    };
+  });
 }
 
 function renameChanges(preview: RenamePreview) {

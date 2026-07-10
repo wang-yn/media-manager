@@ -420,6 +420,29 @@ th {
   padding: 16px;
 }
 
+.batch-rename-dialog {
+  width: min(920px, calc(100vw - 32px));
+}
+
+.batch-rename-groups {
+  display: grid;
+  gap: 14px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.batch-rename-group {
+  display: grid;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e4eaed;
+}
+
+.batch-rename-group h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
 .dialog-close {
   position: absolute;
   top: 10px;
