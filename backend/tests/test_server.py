@@ -399,6 +399,177 @@ path = "{media_root / "tv"}"
             ],
         )
 
+    def test_media_list_reports_metadata_and_rename_status(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            media_root = root / "media"
+            config_path = root / "config.toml"
+            canonical = media_root / "movies" / "Dune (2021)" / "Dune (2021).mkv"
+            missing_metadata = media_root / "movies" / "Arrival (2016)" / "arrival.mkv"
+            canonical.parent.mkdir(parents=True)
+            missing_metadata.parent.mkdir(parents=True)
+            canonical.write_text("", encoding="utf-8")
+            missing_metadata.write_text("", encoding="utf-8")
+            (canonical.parent / "movie.nfo").write_text("<movie />", encoding="utf-8")
+            config_path.write_text(
+                f"""
+[paths]
+media_dir = "{media_root}"
+
+[[libraries]]
+name = "Movies"
+kind = "movie"
+path = "{media_root / "movies"}"
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
+            from media_manager.server import create_app
+
+            items = TestClient(create_app()).get("/api/media").json()["items"]
+
+        by_path = {item["path"]: item for item in items}
+        self.assertTrue(by_path[str(canonical)]["has_metadata"])
+        self.assertFalse(by_path[str(canonical)]["rename_needed"])
+        self.assertFalse(by_path[str(missing_metadata)]["has_metadata"])
+        self.assertTrue(by_path[str(missing_metadata)]["rename_needed"])
+
+    def test_batch_rename_preview_series_has_no_side_effects(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            media_root = root / "media"
+            config_path = root / "config.toml"
+            show = media_root / "tv" / "Pantheon (2022)"
+            first = show / "Season 01" / "Pantheon - S01E03.mkv"
+            second = show / "Season 02" / "Pantheon - S02E01.mp4"
+            first.parent.mkdir(parents=True)
+            second.parent.mkdir(parents=True)
+            first.write_text("", encoding="utf-8")
+            second.write_text("", encoding="utf-8")
+            (show / "tvshow.nfo").write_text(
+                """
+<tvshow>
+  <title>万神殿</title>
+  <originaltitle>Pantheon</originaltitle>
+  <year>2022</year>
+</tvshow>
+""".strip(),
+                encoding="utf-8",
+            )
+            config_path.write_text(
+                f"""
+[paths]
+media_dir = "{media_root}"
+
+[[libraries]]
+name = "TV"
+kind = "series"
+path = "{media_root / "tv"}"
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
+            from media_manager.server import create_app
+
+            client = TestClient(create_app())
+            media_id = client.get("/api/media").json()["items"][0]["id"]
+            response = client.post(f"/api/media/{media_id}/rename/batch/preview")
+            target_show = media_root / "tv" / "Pantheon - 万神殿 (2022)"
+
+            first_exists = first.exists()
+            second_exists = second.exists()
+            target_exists = target_show.exists()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["can_apply"])
+        self.assertGreaterEqual(len(response.json()["changes"]), 3)
+        self.assertTrue(first_exists)
+        self.assertTrue(second_exists)
+        self.assertFalse(target_exists)
+
+    def test_batch_rename_preview_reports_conflict_without_side_effects(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            media_root = root / "media"
+            config_path = root / "config.toml"
+            show = media_root / "tv" / "Pantheon (2022)"
+            source = show / "Season 01" / "Pantheon - S01E03.mkv"
+            target = media_root / "tv" / "Pantheon - 万神殿 (2022)" / "Season 01" / "Pantheon - 万神殿 - S01E03.mkv"
+            source.parent.mkdir(parents=True)
+            target.parent.mkdir(parents=True)
+            source.write_text("source", encoding="utf-8")
+            target.write_text("target", encoding="utf-8")
+            (show / "tvshow.nfo").write_text(
+                """
+<tvshow>
+  <title>万神殿</title>
+  <originaltitle>Pantheon</originaltitle>
+  <year>2022</year>
+</tvshow>
+""".strip(),
+                encoding="utf-8",
+            )
+            config_path.write_text(
+                f"""
+[paths]
+media_dir = "{media_root}"
+
+[[libraries]]
+name = "TV"
+kind = "series"
+path = "{media_root / "tv"}"
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
+            from media_manager.server import create_app
+
+            client = TestClient(create_app())
+            media_id = client.get("/api/media").json()["items"][0]["id"]
+            response = client.post(f"/api/media/{media_id}/rename/batch/preview")
+            source_text = source.read_text(encoding="utf-8")
+            target_text = target.read_text(encoding="utf-8")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["can_apply"])
+        self.assertIn("target_exists", response.json()["conflicts"])
+        self.assertEqual(source_text, "source")
+        self.assertEqual(target_text, "target")
+
+    def test_batch_rename_preview_rejects_movie_item(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            media_root = root / "media"
+            config_path = root / "config.toml"
+            movie = media_root / "movies" / "Dune (2021)" / "Dune (2021).mkv"
+            movie.parent.mkdir(parents=True)
+            movie.write_text("", encoding="utf-8")
+            config_path.write_text(
+                f"""
+[paths]
+media_dir = "{media_root}"
+
+[[libraries]]
+name = "Movies"
+kind = "movie"
+path = "{media_root / "movies"}"
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
+            from media_manager.server import create_app
+
+            client = TestClient(create_app())
+            media_id = client.get("/api/media").json()["items"][0]["id"]
+            response = client.post(f"/api/media/{media_id}/rename/batch/preview")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "unsupported_batch_rename_target")
+
     def test_batch_rename_series_renames_all_episodes(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

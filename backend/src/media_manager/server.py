@@ -15,7 +15,7 @@ from .config import AppConfig, append_library, load_config
 from .errors import AppError
 from .media import MediaItem, directory_files, scan_libraries
 from .nfo import write_nfo
-from .rename import apply_batch_rename, apply_rename, preview_rename
+from .rename import apply_batch_rename, apply_rename, preview_batch_rename, preview_rename
 from .tmdb import TMDBClient
 
 
@@ -86,7 +86,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     @app.get("/api/media")
     def media() -> dict[str, object]:
-        items = [item.to_dict() for item in _scan(app)]
+        items = [_media_dict(item) for item in _scan(app)]
         return {"count": len(items), "items": items}
 
     @app.post("/api/media/{media_id}/metadata/search")
@@ -110,6 +110,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     @app.post("/api/media/{media_id}/rename/apply")
     def rename_apply(media_id: str) -> dict[str, object]:
         return apply_rename(_find_media(app, media_id))
+
+    @app.post("/api/media/{media_id}/rename/batch/preview")
+    def rename_batch_preview(media_id: str) -> dict[str, object]:
+        item = _find_media(app, media_id)
+        if item.kind != "series":
+            raise AppError("unsupported_batch_rename_target", "批量重命名预览只支持剧集", item.kind, item.path)
+        return preview_batch_rename(_series_items(app, item))
 
     @app.post("/api/media/{media_id}/rename/batch")
     def rename_batch(media_id: str) -> dict[str, object]:
@@ -178,6 +185,13 @@ def _find_media(app: FastAPI, media_id: str) -> MediaItem:
         if item.id == media_id:
             return item
     raise AppError("media_not_found", "媒体条目不存在或已经移动", media_id, status=404)
+
+
+def _media_dict(item: MediaItem) -> dict[str, object]:
+    data = item.to_dict()
+    preview = preview_rename(item)
+    data["rename_needed"] = any(Path(change["from"]).resolve() != Path(change["to"]).resolve() for change in preview["changes"])
+    return data
 
 
 def _item_directory(item: MediaItem) -> Path:
