@@ -43,6 +43,9 @@ def config_path() -> Path:
 
 def load_config(path: Path | None = None) -> AppConfig:
     cfg_path = path or config_path()
+    if cfg_path == DEFAULT_CONFIG and not cfg_path.exists():
+        cfg_path.parent.mkdir(parents=True, exist_ok=True)
+        cfg_path.write_bytes(EXAMPLE_CONFIG.read_bytes())
     with cfg_path.open("rb") as file:
         raw = tomllib.load(file)
     libraries = [

@@ -10,8 +10,40 @@ import warnings
 warnings.filterwarnings("ignore", message="Using `httpx` with `starlette.testclient` is deprecated.*")
 from fastapi.testclient import TestClient
 
+from media_manager import config as config_module
+
 
 class ServerTest(unittest.TestCase):
+    def test_initializes_default_config_before_persisting_library(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            media_root = root / "media"
+            library_path = media_root / "movies"
+            config_path = root / "config" / "config.toml"
+            example_path = root / "image" / "config.example.toml"
+            library_path.mkdir(parents=True)
+            example_path.parent.mkdir()
+            example_contents = f'[paths]\nmedia_dir = "{media_root}"\n'
+            example_path.write_text(example_contents, encoding="utf-8")
+
+            with (
+                patch.dict(os.environ, {"MEDIA_MANAGER_CONFIG": str(config_path)}, clear=True),
+                patch.object(config_module, "DEFAULT_CONFIG", config_path),
+                patch.object(config_module, "EXAMPLE_CONFIG", example_path),
+            ):
+                from media_manager.server import create_app
+
+                client = TestClient(create_app())
+                response = client.post(
+                    "/api/libraries",
+                    json={"name": "Movies", "kind": "movie", "path": str(library_path)},
+                )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(config_path.exists())
+            self.assertEqual(config_module.load_config(config_path).libraries[0].name, "Movies")
+            self.assertEqual(example_path.read_text(encoding="utf-8"), example_contents)
+
     def test_health_libraries_and_media(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
