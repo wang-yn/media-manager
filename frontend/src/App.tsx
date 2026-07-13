@@ -223,6 +223,36 @@ export default function App() {
     }
   }
 
+  async function logout() {
+    setBusy("logout");
+    setError(null);
+    try {
+      const response = await fetch("/auth/logout", { method: "POST" });
+      if (response.redirected) {
+        window.location.assign(response.url);
+        return;
+      }
+      const text = await response.text();
+      let data: { redirect?: unknown } = {};
+      if (text) {
+        try {
+          data = JSON.parse(text);
+        } catch {
+          if (!response.ok) {
+            throw new Error(response.statusText || "操作失败");
+          }
+        }
+      }
+      if (!response.ok) {
+        throw data;
+      }
+      window.location.assign(typeof data.redirect === "string" && data.redirect ? data.redirect : "/login");
+    } catch (err) {
+      setError(messageFrom(err));
+      setBusy(null);
+    }
+  }
+
   async function addLibrary(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy("library");
@@ -621,6 +651,9 @@ export default function App() {
           </button>
           <button type="button" onClick={() => setHash({ name: "settings" })}>
             设置
+          </button>
+          <button type="button" onClick={logout} disabled={busy === "logout"}>
+            {busy === "logout" ? "退出中" : "退出"}
           </button>
         </div>
       </header>
