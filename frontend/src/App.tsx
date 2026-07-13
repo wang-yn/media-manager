@@ -458,9 +458,10 @@ export default function App() {
     }
   }
 
-  async function deleteSeries(item: MediaItem) {
-    const path = seriesDirectoryPath(item);
-    if (!window.confirm(`确定删除剧集目录 ${relativeLibraryPath(path, item.library_path)}？此操作会删除目录下所有文件。`)) {
+  async function deleteMedia(item: MediaItem) {
+    const path = item.kind === "series" ? seriesDirectoryPath(item) : dirname(item.path);
+    const type = item.kind === "series" ? "剧集" : "电影";
+    if (!window.confirm(`确定删除${type}目录 ${relativeLibraryPath(path, item.library_path)}？此操作会删除目录下所有文件。`)) {
       return;
     }
     const busyKey = `delete:${item.id}`;
@@ -638,7 +639,7 @@ export default function App() {
           onSearch={openMetadataDialog}
           onRename={openRenameDialog}
           onSearchSubtitle={openSubtitleDialog}
-          onDeleteSeries={deleteSeries}
+          onDeleteMedia={deleteMedia}
           onShowFiles={openFilesDialog}
           onBatchRename={openBatchRenameDialog}
           onBatchMetadata={startMetadataBatch}
@@ -804,7 +805,7 @@ function LibraryDetailView({
   onSearch,
   onRename,
   onSearchSubtitle,
-  onDeleteSeries,
+  onDeleteMedia,
   onShowFiles,
   onBatchRename,
   onBatchMetadata,
@@ -816,7 +817,7 @@ function LibraryDetailView({
   onSearch: (item: MediaItem) => void;
   onRename: (item: MediaItem) => void;
   onSearchSubtitle: (item: MediaItem) => void;
-  onDeleteSeries: (item: MediaItem) => void;
+  onDeleteMedia: (item: MediaItem) => void;
   onShowFiles: (item: MediaItem) => void;
   onBatchRename: (targets: BatchTarget[]) => void;
   onBatchMetadata: (targets: BatchTarget[]) => void;
@@ -923,7 +924,7 @@ function LibraryDetailView({
           busy={busy}
           onSearch={onSearch}
           onOpen={setSelectedSeriesKey}
-          onDelete={onDeleteSeries}
+          onDelete={onDeleteMedia}
           onShowFiles={onShowFiles}
         />
       ) : (
@@ -937,6 +938,7 @@ function LibraryDetailView({
           onRename={onRename}
           onSearchSubtitle={onSearchSubtitle}
           onShowFiles={onShowFiles}
+          onDelete={onDeleteMedia}
         />
       )}
     </section>
@@ -1054,6 +1056,7 @@ function MediaTable({
   onRename,
   onSearchSubtitle,
   onShowFiles,
+  onDelete,
 }: {
   items: MediaItem[];
   selectedKeys?: string[];
@@ -1064,6 +1067,7 @@ function MediaTable({
   onRename: (item: MediaItem) => void;
   onSearchSubtitle: (item: MediaItem) => void;
   onShowFiles: (item: MediaItem) => void;
+  onDelete: (item: MediaItem) => void;
 }) {
   const selectable = Boolean(selectedKeys && onToggle);
   return (
@@ -1095,6 +1099,7 @@ function MediaTable({
               onRename={() => onRename(item)}
               onSearchSubtitle={() => onSearchSubtitle(item)}
               onShowFiles={() => onShowFiles(item)}
+              onDelete={() => onDelete(item)}
             />
           ))}
           {items.length === 0 ? (
@@ -1120,6 +1125,7 @@ function Row({
   onRename,
   onSearchSubtitle,
   onShowFiles,
+  onDelete,
 }: {
   item: MediaItem;
   selected?: boolean;
@@ -1130,6 +1136,7 @@ function Row({
   onRename: () => void;
   onSearchSubtitle: () => void;
   onShowFiles: () => void;
+  onDelete: () => void;
 }) {
   return (
     <tr>
@@ -1164,6 +1171,9 @@ function Row({
           </button>
           <button type="button" onClick={onShowFiles} disabled={busy === `files:${item.id}`}>
             详细文件
+          </button>
+          <button type="button" className="danger-button" onClick={onDelete} disabled={busy === `delete:${item.id}`}>
+            {busy === `delete:${item.id}` ? "删除中" : "删除"}
           </button>
         </div>
       </td>
