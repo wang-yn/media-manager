@@ -1294,6 +1294,7 @@ function BatchRenameDialogView({
           {dialog.entries.map((entry) => {
             const preview = entry.preview;
             const changes = preview ? renameChanges(preview) : [];
+            const visibleChanges = preview ? visibleBatchRenameChanges(preview) : [];
             return (
               <section className="batch-rename-group" key={entry.target.key}>
                 <h3>{mediaTitle(entry.target.item)}</h3>
@@ -1302,7 +1303,8 @@ function BatchRenameDialogView({
                   <div className={preview.can_apply ? "preview" : "preview blocked"}>
                     {preview.conflicts.length > 0 ? <p>冲突：{preview.conflicts.join(", ")}</p> : null}
                     {changes.length === 0 && preview.conflicts.length === 0 ? <p>已经是规范名称，无需修改。</p> : null}
-                    {changes.map((change) => (
+                    {changes.length > 0 && visibleChanges.length === 0 ? <p>仅调整目录位置。</p> : null}
+                    {visibleChanges.map((change) => (
                       <RenameChangePreview key={`${change.from}:${change.to}`} change={change} libraryPath={entry.target.item.library_path} />
                     ))}
                   </div>
@@ -1877,6 +1879,10 @@ function markDuplicateRenameTargets(entries: BatchRenameEntry[]) {
 
 function renameChanges(preview: RenamePreview) {
   return preview.changes.filter((change) => change.from !== change.to);
+}
+
+function visibleBatchRenameChanges(preview: RenamePreview) {
+  return renameChanges(preview).filter((change) => baseName(change.from) !== baseName(change.to));
 }
 
 function hasRenameChanges(preview: RenamePreview) {
