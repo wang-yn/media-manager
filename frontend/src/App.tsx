@@ -938,7 +938,7 @@ function LibraryDetailView({
           onRename={onRename}
           onSearchSubtitle={onSearchSubtitle}
           onShowFiles={onShowFiles}
-          onDelete={onDeleteMedia}
+          onDelete={library.kind === "movie" ? onDeleteMedia : undefined}
         />
       )}
     </section>
@@ -1067,7 +1067,7 @@ function MediaTable({
   onRename: (item: MediaItem) => void;
   onSearchSubtitle: (item: MediaItem) => void;
   onShowFiles: (item: MediaItem) => void;
-  onDelete: (item: MediaItem) => void;
+  onDelete?: (item: MediaItem) => void;
 }) {
   const selectable = Boolean(selectedKeys && onToggle);
   return (
@@ -1099,7 +1099,7 @@ function MediaTable({
               onRename={() => onRename(item)}
               onSearchSubtitle={() => onSearchSubtitle(item)}
               onShowFiles={() => onShowFiles(item)}
-              onDelete={() => onDelete(item)}
+              onDelete={onDelete ? () => onDelete(item) : undefined}
             />
           ))}
           {items.length === 0 ? (
@@ -1136,7 +1136,7 @@ function Row({
   onRename: () => void;
   onSearchSubtitle: () => void;
   onShowFiles: () => void;
-  onDelete: () => void;
+  onDelete?: () => void;
 }) {
   return (
     <tr>
@@ -1172,9 +1172,11 @@ function Row({
           <button type="button" onClick={onShowFiles} disabled={busy === `files:${item.id}`}>
             详细文件
           </button>
-          <button type="button" className="danger-button" onClick={onDelete} disabled={busy === `delete:${item.id}`}>
-            {busy === `delete:${item.id}` ? "删除中" : "删除"}
-          </button>
+          {onDelete ? (
+            <button type="button" className="danger-button" onClick={onDelete} disabled={busy === `delete:${item.id}`}>
+              {busy === `delete:${item.id}` ? "删除中" : "删除"}
+            </button>
+          ) : null}
         </div>
       </td>
     </tr>
