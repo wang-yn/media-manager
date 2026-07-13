@@ -4,6 +4,7 @@ import base64
 import binascii
 import hashlib
 import hmac
+import html
 import http.client
 import json
 import os
@@ -198,11 +199,34 @@ def read_session_cookie(config: AuthConfig, token: str | None, now: int | None =
     return GitHubUser(id=user_id, login=login)
 
 
+def login_page() -> str:
+    return _page("Media Manager", '<a class="button" href="/auth/github/login">使用 GitHub 登录</a>')
+
+
+def error_page() -> str:
+    return _page("登录失败", "<p>请重新登录。</p>")
+
+
+def forbidden_page(login: str) -> str:
+    return _page("该账号未获授权", f"<p>{html.escape(login)} 该账号未获授权。</p>")
+
+
 def _required(environ: Mapping[str, str], name: str) -> str:
     value = environ.get(name)
     if value is None or not value.strip():
         raise AuthConfigError(f"{name} is required")
     return value.strip()
+
+
+def _page(title: str, body: str) -> str:
+    safe_title = html.escape(title)
+    return (
+        "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        f"<title>{safe_title}</title><style>body{{font-family:system-ui,sans-serif;margin:4rem auto;max-width:28rem;padding:0 1rem;line-height:1.5}}"
+        ".button{display:inline-block;background:#111;color:white;padding:.7rem 1rem;border-radius:6px;text-decoration:none}</style></head>"
+        f"<body><h1>{safe_title}</h1>{body}</body></html>"
+    )
 
 
 def _validate_public_url(public_url: str) -> None:

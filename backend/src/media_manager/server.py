@@ -6,11 +6,28 @@ import os
 import shutil
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel
 import uvicorn
 
 from .assrt import AssrtClient, download_subtitle, subtitle_query
+from .auth import (
+    OAUTH_COOKIE_NAME,
+    OAUTH_TTL_SECONDS,
+    SESSION_COOKIE_NAME,
+    SESSION_TTL_SECONDS,
+    AuthConfig,
+    GitHubOAuthClient,
+    GitHubOAuthError,
+    create_oauth_request,
+    error_page,
+    forbidden_page,
+    issue_session_cookie,
+    load_auth_config,
+    login_page,
+    read_session_cookie,
+    verify_oauth_state,
+)
 from .config import AppConfig, append_library, load_config
 from .errors import AppError
 from .media import MediaItem, directory_files, scan_libraries
@@ -20,6 +37,8 @@ from .tmdb import TMDBClient
 
 
 STATIC_DIR = Path(os.environ.get("MEDIA_MANAGER_STATIC_DIR", "frontend/dist")).resolve()
+PUBLIC_PATHS = {"/login", "/auth/github/login", "/auth/github/callback"}
+AUTH_PATHS = PUBLIC_PATHS | {"/auth/logout"}
 
 
 class LibraryInput(BaseModel):
@@ -44,13 +63,75 @@ class SubtitleDownloadInput(BaseModel):
     subtitle_id: int
 
 
-def create_app(config: AppConfig | None = None) -> FastAPI:
+def create_app(
+    config: AppConfig | None = None,
+    *,
+    auth_enabled: bool = True,
+    auth_config: AuthConfig | None = None,
+    github_client: GitHubOAuthClient | None = None,
+) -> FastAPI:
     app = FastAPI(title="Media Manager")
     app.state.config = config or load_config()
+    app.state.auth_enabled = auth_enabled
+    app.state.auth_config = (auth_config or load_auth_config()) if auth_enabled else None
+    app.state.github_client = github_client or GitHubOAuthClient()
 
     @app.exception_handler(AppError)
     async def app_error_handler(_: Request, exc: AppError) -> JSONResponse:
         return JSONResponse(exc.payload(), status_code=exc.status)
+
+    @app.middleware("http")
+    async def require_auth(request: Request, call_next):
+        if not app.state.auth_enabled:
+            if request.url.path in AUTH_PATHS:
+                return JSONResponse({"detail": "Not Found"}, status_code=404)
+            return await call_next(request)
+        if request.method == "GET" and request.url.path in PUBLIC_PATHS:
+            return await call_next(request)
+        user = read_session_cookie(app.state.auth_config, request.cookies.get(SESSION_COOKIE_NAME))
+        if user is None:
+            if request.url.path.startswith("/api/"):
+                return JSONResponse({"error": {"code": "authentication_required", "message": "需要登录"}}, status_code=401)
+            return RedirectResponse("/login", status_code=303)
+        request.state.github_user = user
+        return await call_next(request)
+
+    if auth_enabled:
+        @app.get("/login")
+        def login(request: Request) -> Response:
+            if read_session_cookie(app.state.auth_config, request.cookies.get(SESSION_COOKIE_NAME)):
+                return RedirectResponse("/", status_code=303)
+            return HTMLResponse(login_page())
+
+        @app.get("/auth/github/login")
+        def github_login() -> Response:
+            oauth = create_oauth_request(app.state.auth_config)
+            response = RedirectResponse(oauth.authorize_url, status_code=303)
+            response.set_cookie(OAUTH_COOKIE_NAME, oauth.cookie_value, max_age=OAUTH_TTL_SECONDS, secure=True, httponly=True, samesite="Lax", path="/")
+            return response
+
+        @app.get("/auth/github/callback")
+        def github_callback(request: Request) -> Response:
+            code = request.query_params.get("code")
+            state = request.query_params.get("state")
+            verifier = verify_oauth_state(app.state.auth_config, request.cookies.get(OAUTH_COOKIE_NAME), state)
+            if not code or verifier is None:
+                return _drop_oauth_cookie(HTMLResponse(error_page(), status_code=400))
+            try:
+                user = app.state.github_client.authenticate(app.state.auth_config, code, verifier)
+            except GitHubOAuthError:
+                return _drop_oauth_cookie(HTMLResponse(error_page(), status_code=502))
+            if not app.state.auth_config.allows(user.login):
+                return _drop_oauth_cookie(HTMLResponse(forbidden_page(user.login), status_code=403))
+            response = RedirectResponse("/", status_code=303)
+            response.set_cookie(SESSION_COOKIE_NAME, issue_session_cookie(app.state.auth_config, user), max_age=SESSION_TTL_SECONDS, secure=True, httponly=True, samesite="Lax", path="/")
+            return _drop_oauth_cookie(response)
+
+        @app.post("/auth/logout")
+        def logout() -> Response:
+            response = JSONResponse({"redirect": "/login"})
+            response.delete_cookie(SESSION_COOKIE_NAME, path="/", secure=True, httponly=True, samesite="Lax")
+            return response
 
     @app.get("/api/health")
     def health() -> dict[str, object]:
@@ -174,6 +255,11 @@ def run() -> None:
     host = str(os.environ.get("MEDIA_MANAGER_HOST", server_config.get("host", "0.0.0.0")))
     port = int(os.environ.get("MEDIA_MANAGER_PORT", server_config.get("port", 8000)))
     uvicorn.run(create_app(config), host=host, port=port)
+
+
+def _drop_oauth_cookie(response: Response) -> Response:
+    response.delete_cookie(OAUTH_COOKIE_NAME, path="/", secure=True, httponly=True, samesite="Lax")
+    return response
 
 
 def _config(app: FastAPI) -> AppConfig:

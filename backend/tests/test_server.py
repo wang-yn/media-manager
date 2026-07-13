@@ -33,7 +33,7 @@ class ServerTest(unittest.TestCase):
             ):
                 from media_manager.server import create_app
 
-                client = TestClient(create_app())
+                client = TestClient(create_app(auth_enabled=False))
                 response = client.post(
                     "/api/libraries",
                     json={"name": "Movies", "kind": "movie", "path": str(library_path)},
@@ -71,7 +71,7 @@ path = "{media_root / "movies"}"
             os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
             from media_manager.server import create_app
 
-            client = TestClient(create_app())
+            client = TestClient(create_app(auth_enabled=False))
             health = client.get("/api/health")
             libraries = client.get("/api/libraries")
             media = client.get("/api/media")
@@ -98,7 +98,7 @@ api_key = "test"
             os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
             from media_manager.server import create_app
 
-            client = TestClient(create_app())
+            client = TestClient(create_app(auth_enabled=False))
             response = client.get("/api/health")
 
         self.assertEqual(response.status_code, 200)
@@ -112,7 +112,7 @@ api_key = "test"
             os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
             from media_manager.server import create_app
 
-            client = TestClient(create_app())
+            client = TestClient(create_app(auth_enabled=False))
             response = client.post("/api/libraries", json={"name": "Bad", "kind": "music", "path": "/media/music"})
 
         self.assertEqual(response.status_code, 400)
@@ -127,7 +127,7 @@ api_key = "test"
             os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
             from media_manager.server import create_app
 
-            client = TestClient(create_app())
+            client = TestClient(create_app(auth_enabled=False))
             response = client.post("/api/libraries", json={"name": "Outside", "kind": "movie", "path": str(root / "outside")})
 
         self.assertEqual(response.status_code, 400)
@@ -143,7 +143,7 @@ api_key = "test"
             os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
             from media_manager.server import create_app
 
-            client = TestClient(create_app())
+            client = TestClient(create_app(auth_enabled=False))
             response = client.post("/api/libraries", json={"name": "Missing", "kind": "movie", "path": str(media_root / "missing")})
 
         self.assertEqual(response.status_code, 400)
@@ -166,7 +166,7 @@ token = "test-assrt-token"
             os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
             from media_manager.server import create_app
 
-            response = TestClient(create_app()).get("/api/health")
+            response = TestClient(create_app(auth_enabled=False)).get("/api/health")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["assrt"], "configured")
@@ -199,7 +199,7 @@ path = "{media_root / "movies"}"
             os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
             from media_manager.server import create_app
 
-            client = TestClient(create_app())
+            client = TestClient(create_app(auth_enabled=False))
             media_id = client.get("/api/media").json()["items"][0]["id"]
 
             class FakeTMDBClient:
@@ -247,7 +247,7 @@ path = "{media_root / "movies"}"
             os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
             from media_manager.server import create_app
 
-            client = TestClient(create_app())
+            client = TestClient(create_app(auth_enabled=False))
             media_id = client.get("/api/media").json()["items"][0]["id"]
 
             class FakeAssrtClient:
@@ -292,7 +292,7 @@ path = "{media_root / "movies"}"
             os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
             from media_manager.server import create_app
 
-            client = TestClient(create_app())
+            client = TestClient(create_app(auth_enabled=False))
             media_id = client.get("/api/media").json()["items"][0]["id"]
 
             class FakeAssrtClient:
@@ -337,7 +337,7 @@ path = "{media_root / "tv"}"
             os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
             from media_manager.server import create_app
 
-            client = TestClient(create_app())
+            client = TestClient(create_app(auth_enabled=False))
             media_id = client.get("/api/media").json()["items"][0]["id"]
             response = client.delete(f"/api/media/{media_id}")
             count_after_delete = client.get("/api/media").json()["count"]
@@ -377,7 +377,7 @@ path = "{media_root / "movies"}"
             os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
             from media_manager.server import create_app
 
-            client = TestClient(create_app())
+            client = TestClient(create_app(auth_enabled=False))
             media_id = client.get("/api/media").json()["items"][0]["id"]
             response = client.delete(f"/api/media/{media_id}")
             count_after_delete = client.get("/api/media").json()["count"]
@@ -413,7 +413,7 @@ path = "{movies}"
             os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
             from media_manager.server import create_app
 
-            client = TestClient(create_app())
+            client = TestClient(create_app(auth_enabled=False))
             media_id = client.get("/api/media").json()["items"][0]["id"]
             response = client.delete(f"/api/media/{media_id}")
             movies_exists = movies.exists()
@@ -456,7 +456,7 @@ path = "{media_root / "tv"}"
             os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
             from media_manager.server import create_app
 
-            client = TestClient(create_app())
+            client = TestClient(create_app(auth_enabled=False))
             item = client.get("/api/media").json()["items"][0]
             response = client.get(f"/api/media/{item['id']}/files")
 
@@ -501,7 +501,7 @@ path = "{media_root / "movies"}"
             os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
             from media_manager.server import create_app
 
-            items = TestClient(create_app()).get("/api/media").json()["items"]
+            items = TestClient(create_app(auth_enabled=False)).get("/api/media").json()["items"]
 
         by_path = {item["path"]: item for item in items}
         self.assertTrue(by_path[str(canonical)]["has_metadata"])
@@ -547,7 +547,7 @@ path = "{media_root / "tv"}"
             os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
             from media_manager.server import create_app
 
-            client = TestClient(create_app())
+            client = TestClient(create_app(auth_enabled=False))
             media_id = client.get("/api/media").json()["items"][0]["id"]
             response = client.post(f"/api/media/{media_id}/rename/batch/preview")
             target_show = media_root / "tv" / "Pantheon - 万神殿 (2022)"
@@ -601,7 +601,7 @@ path = "{media_root / "tv"}"
             os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
             from media_manager.server import create_app
 
-            client = TestClient(create_app())
+            client = TestClient(create_app(auth_enabled=False))
             media_id = client.get("/api/media").json()["items"][0]["id"]
             response = client.post(f"/api/media/{media_id}/rename/batch/preview")
             source_text = source.read_text(encoding="utf-8")
@@ -637,7 +637,7 @@ path = "{media_root / "movies"}"
             os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
             from media_manager.server import create_app
 
-            client = TestClient(create_app())
+            client = TestClient(create_app(auth_enabled=False))
             media_id = client.get("/api/media").json()["items"][0]["id"]
             response = client.post(f"/api/media/{media_id}/rename/batch/preview")
 
@@ -683,7 +683,7 @@ path = "{media_root / "tv"}"
             os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
             from media_manager.server import create_app
 
-            client = TestClient(create_app())
+            client = TestClient(create_app(auth_enabled=False))
             media_id = client.get("/api/media").json()["items"][0]["id"]
             response = client.post(f"/api/media/{media_id}/rename/batch")
 
