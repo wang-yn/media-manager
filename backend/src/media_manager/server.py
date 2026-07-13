@@ -143,11 +143,15 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     @app.delete("/api/media/{media_id}")
     def delete_media(media_id: str) -> dict[str, str]:
-        path = _series_directory(_find_media(app, media_id))
+        item = _find_media(app, media_id)
+        path = _item_directory(item).resolve()
+        library_root = Path(item.library_path).resolve()
+        if path == library_root:
+            raise AppError("invalid_delete_target", "不能删除媒体库根目录", str(library_root), item.path)
         try:
             shutil.rmtree(path)
         except OSError as exc:
-            raise AppError("delete_failed", "删除剧集目录失败", str(exc), str(path), status=500) from exc
+            raise AppError("delete_failed", "删除媒体目录失败", str(exc), str(path), status=500) from exc
         return {"deleted_path": str(path)}
 
     @app.get("/{path:path}")

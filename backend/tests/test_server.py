@@ -316,15 +316,19 @@ path = "{media_root / "tv"}"
         self.assertFalse(show_exists)
         self.assertEqual(count_after_delete, 0)
 
-    def test_delete_rejects_movie_item(self) -> None:
+    def test_delete_movie_removes_movie_directory(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             media_root = root / "media"
             config_path = root / "config.toml"
             movie_dir = media_root / "movies" / "Dune (2021)"
             movie = movie_dir / "Dune (2021).mkv"
-            movie.parent.mkdir(parents=True)
-            movie.write_text("", encoding="utf-8")
+            subtitle = movie_dir / "Dune (2021).zh.srt"
+            nfo = movie_dir / "movie.nfo"
+            movie_dir.mkdir(parents=True)
+            movie.write_text("video", encoding="utf-8")
+            subtitle.write_text("subtitle", encoding="utf-8")
+            nfo.write_text("<movie />", encoding="utf-8")
             config_path.write_text(
                 f"""
 [paths]
@@ -344,11 +348,49 @@ path = "{media_root / "movies"}"
             client = TestClient(create_app())
             media_id = client.get("/api/media").json()["items"][0]["id"]
             response = client.delete(f"/api/media/{media_id}")
+            count_after_delete = client.get("/api/media").json()["count"]
             movie_dir_exists = movie_dir.exists()
 
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["deleted_path"], str(movie_dir))
+        self.assertFalse(movie_dir_exists)
+        self.assertEqual(count_after_delete, 0)
+
+    def test_delete_movie_rejects_library_root(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            media_root = root / "media"
+            movies = media_root / "movies"
+            config_path = root / "config.toml"
+            movie = movies / "Loose.Movie.2024.mkv"
+            movies.mkdir(parents=True)
+            movie.write_text("video", encoding="utf-8")
+            config_path.write_text(
+                f"""
+[paths]
+media_dir = "{media_root}"
+
+[[libraries]]
+name = "Movies"
+kind = "movie"
+path = "{movies}"
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
+            from media_manager.server import create_app
+
+            client = TestClient(create_app())
+            media_id = client.get("/api/media").json()["items"][0]["id"]
+            response = client.delete(f"/api/media/{media_id}")
+            movies_exists = movies.exists()
+            movie_exists = movie.exists()
+
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["error"]["code"], "unsupported_delete_target")
-        self.assertTrue(movie_dir_exists)
+        self.assertEqual(response.json()["error"]["code"], "invalid_delete_target")
+        self.assertTrue(movies_exists)
+        self.assertTrue(movie_exists)
 
     def test_media_files_lists_directory_files_recursively(self) -> None:
         with TemporaryDirectory() as tmp:
