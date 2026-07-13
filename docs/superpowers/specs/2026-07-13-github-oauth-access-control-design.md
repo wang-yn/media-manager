@@ -4,13 +4,13 @@
 
 为 Media Manager 增加 GitHub 单点登录。所有页面和 API 默认需要登录，只有环境变量白名单中的 GitHub 用户名可以建立并继续使用会话。
 
-正式访问地址为：
+部署时通过 `MEDIA_MANAGER_PUBLIC_URL` 配置公开访问地址，文档统一使用以下保留示例域名：
 
 ```text
 https://media.example.com
 ```
 
-GitHub OAuth App 回调地址固定为：
+GitHub OAuth App 回调地址为公开访问地址加 `/auth/github/callback`，示例：
 
 ```text
 https://media.example.com/auth/github/callback
