@@ -3,14 +3,20 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import http.client
 import json
 import time
+from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlparse
 import unittest
 from unittest.mock import patch
 
 from media_manager.auth import (
     AuthConfigError,
+    GITHUB_TOKEN_URL,
+    GITHUB_USER_URL,
+    GitHubOAuthClient,
+    GitHubOAuthError,
     GitHubUser,
     create_oauth_request,
     issue_session_cookie,
@@ -149,6 +155,178 @@ class OAuthRequestTest(unittest.TestCase):
         self.assertIsNone(verify_oauth_state(config, request.cookie_value, None, now=1000))
         self.assertIsNone(verify_oauth_state(config, "", "state-value", now=1000))
         self.assertIsNone(verify_oauth_state(config, request.cookie_value, "state-value", now=1600))
+
+
+class FakeResponse:
+    def __init__(self, body: bytes, read_error: Exception | None = None) -> None:
+        self.body = body
+        self.read_error = read_error
+
+    def __enter__(self) -> "FakeResponse":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        if self.read_error is not None:
+            raise self.read_error
+        return self.body
+
+
+class GitHubOAuthClientTest(unittest.TestCase):
+    def authenticate(
+        self,
+        token_body: bytes = b'{"access_token":"access-token"}',
+        user_body: bytes = b'{"id":42,"login":"Alice"}',
+    ) -> tuple[GitHubUser, list[object]]:
+        calls: list[object] = []
+
+        def opener(request: object, timeout: int = 0) -> FakeResponse:
+            calls.append((request, timeout))
+            return FakeResponse(token_body if len(calls) == 1 else user_body)
+
+        config = load_auth_config(valid_environ())
+        user = GitHubOAuthClient(opener=opener).authenticate(config, "test-code", "test-verifier")
+        return user, calls
+
+    def assert_generic_error(self, exc: GitHubOAuthError) -> None:
+        self.assertEqual(str(exc), "GitHub OAuth 请求失败")
+        for secret in ("client-secret", "access-token", "test-code", "test-verifier", "raw-body"):
+            self.assertNotIn(secret, str(exc))
+
+    def test_authenticate_posts_token_request_and_fetches_user(self) -> None:
+        user, calls = self.authenticate()
+
+        self.assertEqual(user, GitHubUser(id=42, login="Alice"))
+        self.assertEqual(len(calls), 2)
+
+        token_request, token_timeout = calls[0]
+        self.assertEqual(token_timeout, 10)
+        self.assertEqual(token_request.full_url, GITHUB_TOKEN_URL)
+        self.assertEqual(token_request.get_method(), "POST")
+        self.assertEqual(token_request.get_header("Accept"), "application/json")
+        self.assertEqual(token_request.get_header("Content-type"), "application/x-www-form-urlencoded")
+        self.assertEqual(
+            parse_qs(token_request.data.decode()),
+            {
+                "client_id": ["client-id"],
+                "client_secret": ["client-secret"],
+                "code": ["test-code"],
+                "redirect_uri": ["https://media.example.com/auth/github/callback"],
+                "code_verifier": ["test-verifier"],
+            },
+        )
+
+        user_request, user_timeout = calls[1]
+        self.assertEqual(user_timeout, 10)
+        self.assertEqual(user_request.full_url, GITHUB_USER_URL)
+        self.assertEqual(user_request.get_method(), "GET")
+        self.assertEqual(user_request.get_header("Authorization"), "Bearer access-token")
+        self.assertEqual(user_request.get_header("Accept"), "application/vnd.github+json")
+        self.assertEqual(user_request.get_header("User-agent"), "Media-Manager")
+        self.assertEqual(user_request.get_header("X-github-api-version"), "2022-11-28")
+
+    def test_token_endpoint_failures_are_generic(self) -> None:
+        failures = [
+            HTTPError(GITHUB_TOKEN_URL, 500, "raw-body access-token", {}, None),
+            URLError("raw-body access-token"),
+            TimeoutError("raw-body access-token"),
+        ]
+        for failure in failures:
+            with self.subTest(failure=type(failure).__name__):
+                def opener(request: object, timeout: int = 0) -> FakeResponse:
+                    raise failure
+
+                with self.assertRaises(GitHubOAuthError) as raised:
+                    GitHubOAuthClient(opener=opener).authenticate(load_auth_config(valid_environ()), "test-code", "test-verifier")
+                self.assert_generic_error(raised.exception)
+
+    def test_token_response_read_failure_is_generic(self) -> None:
+        def opener(request: object, timeout: int = 0) -> FakeResponse:
+            return FakeResponse(b"", http.client.IncompleteRead(partial=b"raw-body access-token"))
+
+        with self.assertRaises(GitHubOAuthError) as raised:
+            GitHubOAuthClient(opener=opener).authenticate(load_auth_config(valid_environ()), "test-code", "test-verifier")
+        self.assertIsNone(raised.exception.__context__)
+        self.assert_generic_error(raised.exception)
+
+    def test_rejects_invalid_token_payload(self) -> None:
+        bodies = [
+            b"raw-body",
+            b"\xff",
+            b"[]",
+            b"{}",
+            b'{"access_token":""}',
+            b'{"access_token":123}',
+        ]
+        for body in bodies:
+            with self.subTest(body=body):
+                with self.assertRaises(GitHubOAuthError) as raised:
+                    self.authenticate(token_body=body)
+                self.assert_generic_error(raised.exception)
+
+    def test_user_endpoint_failures_are_generic(self) -> None:
+        failures = [
+            HTTPError(GITHUB_USER_URL, 500, "raw-body access-token", {}, None),
+            URLError("raw-body access-token"),
+            TimeoutError("raw-body access-token"),
+        ]
+        for failure in failures:
+            with self.subTest(failure=type(failure).__name__):
+                calls = 0
+
+                def opener(request: object, timeout: int = 0) -> FakeResponse:
+                    nonlocal calls
+                    calls += 1
+                    if calls == 1:
+                        return FakeResponse(b'{"access_token":"access-token"}')
+                    self.assertEqual(request.full_url, GITHUB_USER_URL)
+                    raise failure
+
+                with self.assertRaises(GitHubOAuthError) as raised:
+                    GitHubOAuthClient(opener=opener).authenticate(load_auth_config(valid_environ()), "test-code", "test-verifier")
+                self.assertEqual(calls, 2)
+                self.assert_generic_error(raised.exception)
+
+    def test_user_response_read_failure_is_generic(self) -> None:
+        calls = 0
+
+        def opener(request: object, timeout: int = 0) -> FakeResponse:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return FakeResponse(b'{"access_token":"access-token"}')
+            self.assertEqual(request.full_url, GITHUB_USER_URL)
+            return FakeResponse(b"", http.client.IncompleteRead(partial=b"raw-body access-token"))
+
+        with self.assertRaises(GitHubOAuthError) as raised:
+            GitHubOAuthClient(opener=opener).authenticate(load_auth_config(valid_environ()), "test-code", "test-verifier")
+        self.assertEqual(calls, 2)
+        self.assertIsNone(raised.exception.__context__)
+        self.assert_generic_error(raised.exception)
+
+    def test_rejects_invalid_user_payload(self) -> None:
+        bodies = [
+            b"raw-body",
+            b"\xff",
+            b"[]",
+            b"{}",
+            b'{"id":true,"login":"Alice"}',
+            b'{"id":"42","login":"Alice"}',
+            b'{"id":42,"login":""}',
+            b'{"id":42,"login":123}',
+        ]
+        for body in bodies:
+            with self.subTest(body=body):
+                with self.assertRaises(GitHubOAuthError) as raised:
+                    self.authenticate(user_body=body)
+                self.assert_generic_error(raised.exception)
+
+    def test_client_does_not_store_access_token(self) -> None:
+        client = GitHubOAuthClient(opener=lambda request, timeout=0: FakeResponse(b'{"access_token":"access-token"}'))
+
+        self.assertFalse(hasattr(client, "access_token"))
 
 
 if __name__ == "__main__":

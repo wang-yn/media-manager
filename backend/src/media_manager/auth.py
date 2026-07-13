@@ -4,13 +4,17 @@ import base64
 import binascii
 import hashlib
 import hmac
+import http.client
 import json
 import os
 import secrets
 import time
 from dataclasses import dataclass, field
 from typing import Mapping, Any
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
+from urllib.request import Request
+import urllib.request
 
 
 OAUTH_COOKIE_NAME = "media_manager_oauth"
@@ -18,10 +22,17 @@ SESSION_COOKIE_NAME = "media_manager_session"
 OAUTH_TTL_SECONDS = 600
 SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
 GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
+GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token"
+GITHUB_USER_URL = "https://api.github.com/user"
 
 
 class AuthConfigError(ValueError):
     pass
+
+
+class GitHubOAuthError(RuntimeError):
+    def __init__(self) -> None:
+        super().__init__("GitHub OAuth 请求失败")
 
 
 @dataclass(frozen=True)
@@ -50,6 +61,57 @@ class GitHubUser:
 class OAuthRequest:
     authorize_url: str
     cookie_value: str
+
+
+class GitHubOAuthClient:
+    def __init__(self, opener=None) -> None:
+        self._opener = urllib.request.urlopen if opener is None else opener
+
+    def authenticate(self, config: AuthConfig, code: str, verifier: str) -> GitHubUser:
+        try:
+            token_request = Request(
+                GITHUB_TOKEN_URL,
+                data=urlencode({
+                    "client_id": config.client_id,
+                    "client_secret": config.client_secret,
+                    "code": code,
+                    "redirect_uri": config.callback_url,
+                    "code_verifier": verifier,
+                }).encode(),
+                headers={"Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"},
+                method="POST",
+            )
+            token_payload = self._read_json_object(token_request)
+            access_token = token_payload.get("access_token")
+            if not isinstance(access_token, str) or not access_token:
+                raise GitHubOAuthError()
+
+            user_request = Request(
+                GITHUB_USER_URL,
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Accept": "application/vnd.github+json",
+                    "User-Agent": "Media-Manager",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+                method="GET",
+            )
+            user_payload = self._read_json_object(user_request)
+            user_id = user_payload.get("id")
+            login = user_payload.get("login")
+            if isinstance(user_id, bool) or not isinstance(user_id, int) or not isinstance(login, str) or not login:
+                raise GitHubOAuthError()
+            return GitHubUser(id=user_id, login=login)
+        except (HTTPError, URLError, TimeoutError, http.client.HTTPException, UnicodeDecodeError, json.JSONDecodeError, GitHubOAuthError):
+            pass
+        raise GitHubOAuthError()
+
+    def _read_json_object(self, request: Request) -> dict[str, Any]:
+        with self._opener(request, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise GitHubOAuthError()
+        return payload
 
 
 def load_auth_config(environ: Mapping[str, str] | None = None) -> AuthConfig:
