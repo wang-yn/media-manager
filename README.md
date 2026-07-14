@@ -64,7 +64,7 @@ export GITHUB_ALLOWED_USERS="wang-yn,other-user"
 ## Docker 部署
 
 ```bash
-docker pull ghcr.io/wang-yn/media-manager:v1.1.0
+docker pull ghcr.io/wang-yn/media-manager:v1.1.1
 docker run -d \
   --name media-manager \
   -p 8000:8000 \
@@ -80,7 +80,7 @@ docker run -d \
   -v "$PWD/config:/config" \
   -v "$PWD/media:/media" \
   --restart unless-stopped \
-  ghcr.io/wang-yn/media-manager:v1.1.0
+  ghcr.io/wang-yn/media-manager:v1.1.1
 ```
 
 访问 `MEDIA_MANAGER_PUBLIC_URL` 对应的 HTTPS 地址，例如 `https://media.example.com`。容器内的 8000 端口通常由 HTTPS 反向代理转发；Secure Cookie 要求浏览器通过 HTTPS 访问。
@@ -98,7 +98,7 @@ docker rm media-manager
 ```yaml
 services:
   media-manager:
-    image: ghcr.io/wang-yn/media-manager:v1.1.0
+    image: ghcr.io/wang-yn/media-manager:v1.1.1
     container_name: media-manager
     environment:
       - TZ=Asia/Shanghai
