@@ -3,9 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 import unittest
 
-from media_manager.media import MediaItem, scan_libraries
+from media_manager.media import MediaItem, audit_libraries, scan_libraries
 
 
 @dataclass(frozen=True)
@@ -205,6 +206,85 @@ class ScanLibrariesTest(unittest.TestCase):
         self.assertEqual(by_episode[(1, 1)].year, 2024)
         self.assertEqual(by_episode[(1, 2)].title, "The Last of Us")
         self.assertIsNone(by_episode[(1, 2)].year)
+
+    def test_audit_libraries_reports_quality_issues(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            movies = root / "movies"
+            tv = root / "tv"
+
+            (movies / "Empty").mkdir(parents=True)
+            (movies / "Images Only").mkdir(parents=True)
+            (movies / "Images Only" / "poster.jpg").write_bytes(b"poster")
+            (movies / "Loose.Movie.2024.mkv").write_bytes(b"x")
+            (movies / "Bad Movie").mkdir(parents=True)
+            (movies / "Bad Movie" / "Bad Movie.mkv").write_bytes(b"x")
+            (movies / "Orphans").mkdir(parents=True)
+            (movies / "Orphans" / "lost.srt").write_text("subtitle", encoding="utf-8")
+            (movies / ".@__thumb").mkdir(parents=True)
+            (movies / ".@__thumb" / "ignored.srt").write_text("ignored", encoding="utf-8")
+            ok_movie = movies / "沙丘 Dune (2021)" / "沙丘 Dune (2021).mkv"
+            ok_movie.parent.mkdir(parents=True)
+            with ok_movie.open("wb") as file:
+                file.truncate(105 * 1024 * 1024)
+
+            (tv / "Root.Show.S01E01.mkv").parent.mkdir(parents=True, exist_ok=True)
+            (tv / "Root.Show.S01E01.mkv").write_bytes(b"x")
+            missing_season = tv / "Pantheon (2022)" / "Pantheon - S01E03.mkv"
+            missing_season.parent.mkdir(parents=True)
+            missing_season.write_bytes(b"x")
+            bad_season = tv / "Good Show (2024)" / "Season One" / "Good Show - S01E01.mkv"
+            bad_season.parent.mkdir(parents=True)
+            bad_season.write_bytes(b"x")
+            bad_episode = tv / "Another Show (2024)" / "Season 01" / "Another Show - Episode 01.mkv"
+            bad_episode.parent.mkdir(parents=True)
+            bad_episode.write_bytes(b"x")
+            ok_episode = tv / "Valid Show (2024)" / "Season 01" / "Valid Show - S01E01.mkv"
+            ok_episode.parent.mkdir(parents=True)
+            with ok_episode.open("wb") as file:
+                file.truncate(105 * 1024 * 1024)
+
+            results = audit_libraries(
+                [
+                    Library("Movies", "movie", movies),
+                    Library("TV", "series", tv),
+                ]
+            )
+
+        by_library = {result.name: result for result in results}
+        movie_issues = {(issue.type, issue.relative_path) for issue in by_library["Movies"].issues}
+        tv_issues = {(issue.type, issue.relative_path) for issue in by_library["TV"].issues}
+        all_paths = [issue.relative_path for result in results for issue in result.issues]
+
+        self.assertIn(("empty_directory", "Empty"), movie_issues)
+        self.assertIn(("directory_without_video", "Images Only"), movie_issues)
+        self.assertIn(("orphaned_sidecar", "Orphans/lost.srt"), movie_issues)
+        self.assertIn(("invalid_movie_layout", "Loose.Movie.2024.mkv"), movie_issues)
+        self.assertIn(("invalid_movie_layout", "Bad Movie/Bad Movie.mkv"), movie_issues)
+        self.assertIn(("small_video_file", "Bad Movie/Bad Movie.mkv"), movie_issues)
+        self.assertIn(("invalid_series_layout", "Root.Show.S01E01.mkv"), tv_issues)
+        self.assertIn(("invalid_series_layout", "Pantheon (2022)/Pantheon - S01E03.mkv"), tv_issues)
+        self.assertIn(("invalid_series_layout", "Good Show (2024)/Season One/Good Show - S01E01.mkv"), tv_issues)
+        self.assertIn(("invalid_series_layout", "Another Show (2024)/Season 01/Another Show - Episode 01.mkv"), tv_issues)
+        self.assertNotIn("沙丘 Dune (2021)/沙丘 Dune (2021).mkv", [path for issue_type, path in movie_issues if issue_type != "small_video_file"])
+        self.assertFalse(any(".@__thumb" in path for path in all_paths))
+        self.assertNotIn(str(root), str(by_library["Movies"].to_dict()))
+
+    def test_audit_libraries_reports_read_error_without_stopping(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            movies = root / "movies"
+            movie = movies / "沙丘 Dune (2021)" / "沙丘 Dune (2021).mkv"
+            movie.parent.mkdir(parents=True)
+            movie.write_bytes(b"x")
+
+            with patch("media_manager.media._file_size", side_effect=OSError("permission denied")):
+                result = audit_libraries([Library("Movies", "movie", movies)])[0]
+
+        self.assertEqual(len(result.issues), 1)
+        self.assertEqual(result.issues[0].type, "read_error")
+        self.assertEqual(result.issues[0].relative_path, "沙丘 Dune (2021)/沙丘 Dune (2021).mkv")
+        self.assertEqual(result.issues[0].detail, "permission denied")
 
 
 if __name__ == "__main__":
