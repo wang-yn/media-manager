@@ -135,6 +135,42 @@ type BatchSummary = {
   results: BatchResult[];
 };
 
+type AuditIssueType =
+  | "empty_directory"
+  | "directory_without_video"
+  | "orphaned_sidecar"
+  | "invalid_movie_layout"
+  | "invalid_series_layout"
+  | "small_video_file"
+  | "read_error";
+
+type AuditIssue = {
+  id: string;
+  type: AuditIssueType;
+  message: string;
+  library: string;
+  relative_path: string;
+  size_bytes?: number | null;
+  detail?: string | null;
+};
+
+type AuditLibraryResult = {
+  name: string;
+  type: "movie" | "series";
+  issues: AuditIssue[];
+};
+
+type AuditResponse = {
+  libraries: AuditLibraryResult[];
+};
+
+type AuditFilter = AuditIssueType | "all";
+
+type AuditDialog = AuditResponse & {
+  filter: AuditFilter;
+  error?: string;
+};
+
 type ApiError = {
   error?: {
     code?: string;
@@ -184,6 +220,7 @@ export default function App() {
   const [guidedBatch, setGuidedBatch] = useState<GuidedBatch | null>(null);
   const [batchSummary, setBatchSummary] = useState<BatchSummary | null>(null);
   const [filesDialog, setFilesDialog] = useState<FilesDialog | null>(null);
+  const [auditDialog, setAuditDialog] = useState<AuditDialog | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [batchRenameApplying, setBatchRenameApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -524,6 +561,41 @@ export default function App() {
     }
   }
 
+  async function openAuditDialog() {
+    const busyKey = "audit";
+    setBusy(busyKey);
+    setError(null);
+    try {
+      const result = await request<AuditResponse>("/api/audit");
+      setAuditDialog({ ...result, filter: "all", error: undefined });
+    } catch (err) {
+      setError(messageFrom(err));
+    } finally {
+      setBusy((current) => (current === busyKey ? null : current));
+    }
+  }
+
+  async function refreshAuditDialog() {
+    const busyKey = "audit";
+    setBusy(busyKey);
+    try {
+      const result = await request<AuditResponse>("/api/audit");
+      setAuditDialog((current) => ({ ...result, filter: current?.filter ?? "all", error: undefined }));
+    } catch (err) {
+      setAuditDialog((current) => (current ? { ...current, error: messageFrom(err) } : current));
+    } finally {
+      setBusy((current) => (current === busyKey ? null : current));
+    }
+  }
+
+  function exportAuditCsv(dialog: AuditDialog) {
+    try {
+      downloadText("media-library-audit.csv", auditCsv(dialog));
+    } catch (err) {
+      setAuditDialog((current) => (current ? { ...current, error: messageFrom(err) } : current));
+    }
+  }
+
   function openGuidedBatchItem(kind: GuidedBatchKind, item: MediaItem) {
     if (kind === "metadata") {
       openMetadataDialog(item);
@@ -674,6 +746,7 @@ export default function App() {
           onSearchSubtitle={openSubtitleDialog}
           onDeleteMedia={deleteMedia}
           onShowFiles={openFilesDialog}
+          onAudit={openAuditDialog}
           onBatchRename={openBatchRenameDialog}
           onBatchMetadata={startMetadataBatch}
           onBatchSubtitles={startSubtitleBatch}
@@ -717,6 +790,16 @@ export default function App() {
       ) : null}
 
       {filesDialog ? <FilesDialogView dialog={filesDialog} busy={busy} onClose={() => setFilesDialog(null)} /> : null}
+      {auditDialog ? (
+        <AuditDialogView
+          dialog={auditDialog}
+          busy={busy}
+          onChange={setAuditDialog}
+          onRefresh={refreshAuditDialog}
+          onExport={exportAuditCsv}
+          onClose={() => setAuditDialog(null)}
+        />
+      ) : null}
       {batchSummary ? <BatchSummaryDialog summary={batchSummary} onClose={() => setBatchSummary(null)} /> : null}
     </main>
   );
@@ -840,6 +923,7 @@ function LibraryDetailView({
   onSearchSubtitle,
   onDeleteMedia,
   onShowFiles,
+  onAudit,
   onBatchRename,
   onBatchMetadata,
   onBatchSubtitles,
@@ -852,6 +936,7 @@ function LibraryDetailView({
   onSearchSubtitle: (item: MediaItem) => void;
   onDeleteMedia: (item: MediaItem) => void;
   onShowFiles: (item: MediaItem) => void;
+  onAudit: () => void;
   onBatchRename: (targets: BatchTarget[]) => void;
   onBatchMetadata: (targets: BatchTarget[]) => void;
   onBatchSubtitles: (targets: BatchTarget[]) => void;
@@ -921,9 +1006,14 @@ function LibraryDetailView({
             </button>
           </div>
         ) : (
-          <button type="button" className="link-button" onClick={() => setHash({ name: "home" })}>
-            返回媒体库
-          </button>
+          <div className="top-actions">
+            <button type="button" onClick={onAudit} disabled={busy === "audit"}>
+              {busy === "audit" ? "检查中" : "检查媒体库"}
+            </button>
+            <button type="button" className="link-button" onClick={() => setHash({ name: "home" })}>
+              返回媒体库
+            </button>
+          </div>
         )}
       </div>
       {!selectedSeries ? (
@@ -1582,6 +1672,100 @@ function SubtitleDialogView({
   );
 }
 
+function AuditDialogView({
+  dialog,
+  busy,
+  onChange,
+  onRefresh,
+  onExport,
+  onClose,
+}: {
+  dialog: AuditDialog;
+  busy: string | null;
+  onChange: (dialog: AuditDialog) => void;
+  onRefresh: () => void;
+  onExport: (dialog: AuditDialog) => void;
+  onClose: () => void;
+}) {
+  const allIssues = auditIssues(dialog);
+  const visibleIssues = dialog.filter === "all" ? allIssues : allIssues.filter((issue) => issue.type === dialog.filter);
+  const checking = busy === "audit";
+
+  return (
+    <div className="dialog-backdrop">
+      <section className="dialog audit-dialog" role="dialog" aria-modal="true" aria-label="媒体库检查结果">
+        <button type="button" className="dialog-close" onClick={onClose} aria-label="关闭" disabled={checking}>
+          X
+        </button>
+        <div className="section-head">
+          <div>
+            <h2>媒体库检查结果</h2>
+            <p className="batch-progress">{checking ? "正在检查..." : `${allIssues.length} 个问题`}</p>
+          </div>
+          <div className="top-actions">
+            <button type="button" className="link-button" onClick={onRefresh} disabled={checking}>
+              重新检查
+            </button>
+            <button type="button" onClick={() => onExport(dialog)} disabled={checking || allIssues.length === 0}>
+              导出 CSV
+            </button>
+          </div>
+        </div>
+        {dialog.error ? <p className="notice error">{dialog.error}</p> : null}
+        <div className="audit-filters" aria-label="检查结果筛选">
+          <button type="button" className={dialog.filter === "all" ? "audit-filter active" : "audit-filter"} onClick={() => onChange({ ...dialog, filter: "all" })}>
+            全部 {allIssues.length}
+          </button>
+          {AUDIT_TYPES.map((type) => {
+            const count = allIssues.filter((issue) => issue.type === type).length;
+            return (
+              <button
+                key={type}
+                type="button"
+                className={dialog.filter === type ? "audit-filter active" : "audit-filter"}
+                onClick={() => onChange({ ...dialog, filter: type })}
+              >
+                {AUDIT_TYPE_LABELS[type]} {count}
+              </button>
+            );
+          })}
+        </div>
+        {visibleIssues.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>媒体库</th>
+                  <th>问题</th>
+                  <th>相对路径</th>
+                  <th>详情</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleIssues.map((issue) => (
+                  <tr key={issue.id}>
+                    <td>{issue.library}</td>
+                    <td>{AUDIT_TYPE_LABELS[issue.type]}</td>
+                    <td className="path">{issue.relative_path}</td>
+                    <td>{auditDetail(issue)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="empty">{allIssues.length === 0 ? "未发现结构问题" : "当前筛选下没有问题"}</p>
+        )}
+        <div className="dialog-actions">
+          <button type="button" className="link-button" onClick={onClose} disabled={checking}>
+            取消
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function BatchSummaryDialog({ summary, onClose }: { summary: BatchSummary; onClose: () => void }) {
   const success = summary.results.filter((result) => result.status === "success").length;
   const failed = summary.results.filter((result) => result.status === "failed").length;
@@ -1628,6 +1812,72 @@ function Status({ label, value, tone }: { label: string; value: string; tone?: "
       <strong className={tone ?? ""}>{value}</strong>
     </div>
   );
+}
+
+const AUDIT_TYPES: AuditIssueType[] = [
+  "empty_directory",
+  "directory_without_video",
+  "orphaned_sidecar",
+  "invalid_movie_layout",
+  "invalid_series_layout",
+  "small_video_file",
+  "read_error",
+];
+
+const AUDIT_TYPE_LABELS: Record<AuditIssueType, string> = {
+  empty_directory: "空目录",
+  directory_without_video: "无视频目录",
+  orphaned_sidecar: "孤立旁路文件",
+  invalid_movie_layout: "电影结构异常",
+  invalid_series_layout: "剧集结构异常",
+  small_video_file: "小视频文件",
+  read_error: "读取失败",
+};
+
+function auditIssues(dialog: AuditDialog) {
+  return dialog.libraries.flatMap((library) => library.issues);
+}
+
+function auditDetail(issue: AuditIssue) {
+  const parts = [issue.message];
+  if (issue.size_bytes !== null && issue.size_bytes !== undefined) {
+    parts.push(formatBytes(issue.size_bytes));
+  }
+  if (issue.detail) {
+    parts.push(issue.detail);
+  }
+  return parts.join(" / ");
+}
+
+function auditCsv(dialog: AuditDialog) {
+  const rows = [["媒体库", "类型", "问题", "相对路径", "详情", "大小"]];
+  for (const issue of auditIssues(dialog)) {
+    rows.push([
+      issue.library,
+      issue.type,
+      AUDIT_TYPE_LABELS[issue.type],
+      issue.relative_path,
+      [issue.message, issue.detail].filter(Boolean).join(" / "),
+      issue.size_bytes !== null && issue.size_bytes !== undefined ? formatBytes(issue.size_bytes) : "",
+    ]);
+  }
+  return rows.map((row) => row.map(csvValue).join(",")).join("\n");
+}
+
+function csvValue(value: string) {
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
+function downloadText(filename: string, contents: string) {
+  const blob = new Blob([contents], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {

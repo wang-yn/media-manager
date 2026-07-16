@@ -428,6 +428,10 @@ th {
   width: min(920px, calc(100vw - 32px));
 }
 
+.audit-dialog {
+  width: min(980px, calc(100vw - 32px));
+}
+
 .batch-rename-groups {
   display: grid;
   gap: 14px;
@@ -515,6 +519,27 @@ th {
   flex-wrap: wrap;
   gap: 12px;
   margin: 14px 0;
+}
+
+.audit-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.audit-filter {
+  min-width: 0;
+  min-height: 34px;
+  border-color: #c9d4d8;
+  background: #fff;
+  color: #1f2933;
+}
+
+.audit-filter.active {
+  border-color: #1f6f64;
+  background: #1f6f64;
+  color: #fff;
 }
 
 .dialog-actions {
