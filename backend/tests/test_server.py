@@ -105,6 +105,66 @@ api_key = "test"
         self.assertEqual(response.json()["tmdb"], "configured")
         self.assertNotIn("test", str(response.json()))
 
+    def test_audit_endpoint_returns_grouped_relative_issues(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            media_root = root / "media"
+            config_path = root / "config.toml"
+            empty = media_root / "movies" / "Empty"
+            empty.mkdir(parents=True)
+            config_path.write_text(
+                f"""
+[paths]
+media_dir = "{media_root}"
+
+[[libraries]]
+name = "Movies"
+kind = "movie"
+path = "{media_root / "movies"}"
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
+            from media_manager.server import create_app
+
+            response = TestClient(create_app(auth_enabled=False)).get("/api/audit")
+
+        self.assertTrue(response.headers["content-type"].startswith("application/json"))
+        data = response.json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(data["libraries"][0]["name"], "Movies")
+        self.assertEqual(data["libraries"][0]["type"], "movie")
+        self.assertNotIn("path", data["libraries"][0])
+        self.assertEqual(data["libraries"][0]["issues"][0]["relative_path"], "Empty")
+        self.assertNotIn(str(media_root), str(data))
+
+    def test_audit_endpoint_rejects_missing_library_root(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            media_root = root / "media"
+            config_path = root / "config.toml"
+            config_path.write_text(
+                f"""
+[paths]
+media_dir = "{media_root}"
+
+[[libraries]]
+name = "Movies"
+kind = "movie"
+path = "{media_root / "missing"}"
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
+            from media_manager.server import create_app
+
+            response = TestClient(create_app(auth_enabled=False)).get("/api/audit")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "invalid_library_path")
+
     def test_error_response_is_structured(self) -> None:
         with TemporaryDirectory() as tmp:
             config_path = Path(tmp) / "config.toml"

@@ -30,7 +30,7 @@ from .auth import (
 )
 from .config import AppConfig, append_library, load_config
 from .errors import AppError
-from .media import MediaItem, directory_files, scan_libraries
+from .media import MediaItem, audit_libraries, directory_files, scan_libraries
 from .nfo import write_nfo
 from .rename import apply_batch_rename, apply_rename, preview_batch_rename, preview_rename
 from .tmdb import TMDBClient
@@ -169,6 +169,14 @@ def create_app(
     def media() -> dict[str, object]:
         items = [_media_dict(item) for item in _scan(app)]
         return {"count": len(items), "items": items}
+
+    @app.get("/api/audit")
+    def audit() -> dict[str, object]:
+        libraries = _config(app).libraries
+        for library in libraries:
+            if not Path(library.path).is_dir():
+                raise AppError("invalid_library_path", "媒体库目录不存在或不可访问", path=str(library.path))
+        return {"libraries": [result.to_dict() for result in audit_libraries(libraries)]}
 
     @app.post("/api/media/{media_id}/metadata/search")
     def metadata_search(media_id: str, input: MetadataSearchInput | None = None) -> dict[str, object]:
