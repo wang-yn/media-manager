@@ -1,4 +1,26 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
+import {
+  faArrowLeft,
+  faCheck,
+  faClipboardCheck,
+  faClosedCaptioning,
+  faDownload,
+  faEye,
+  faFileExport,
+  faFolderOpen,
+  faGear,
+  faHouse,
+  faLayerGroup,
+  faMagnifyingGlass,
+  faPlus,
+  faRightFromBracket,
+  faRotateRight,
+  faTrash,
+  faWandMagicSparkles,
+  faXmark,
+} from "@fortawesome/free-solid-svg-icons";
+import { FormEvent, useEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 
 type Health = {
   status: string;
@@ -182,6 +204,33 @@ type ApiError = {
 
 const emptyMedia: MediaResponse = { count: 0, items: [] };
 
+type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  icon: IconDefinition;
+  label: string;
+};
+
+function AppButton({ icon, label, children, className = "", ...props }: ButtonProps & { children?: ReactNode }) {
+  return (
+    <button {...props} className={["app-button inline-flex items-center justify-center gap-2", className].filter(Boolean).join(" ")}>
+      <FontAwesomeIcon icon={icon} aria-hidden="true" />
+      <span>{children ?? label}</span>
+    </button>
+  );
+}
+
+function IconButton({ icon, label, className = "", ...props }: ButtonProps) {
+  return (
+    <button
+      {...props}
+      className={["icon-button inline-flex items-center justify-center", className].filter(Boolean).join(" ")}
+      title={String(props.title ?? label)}
+      aria-label={String(props["aria-label"] ?? label)}
+    >
+      <FontAwesomeIcon icon={icon} aria-hidden="true" />
+    </button>
+  );
+}
+
 type View = { name: "home" } | { name: "settings" } | { name: "library"; libraryId: string };
 
 type LibrarySummary = Library & {
@@ -301,6 +350,27 @@ export default function App() {
       });
       setLibraries(updated);
       setForm({ name: "", kind: "movie", path: "" });
+      await refreshContent();
+    } catch (err) {
+      setError(messageFrom(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function deleteLibrary(library: Library) {
+    if (!window.confirm(`确定删除媒体库 ${library.name}？不会删除磁盘上的媒体文件。`)) {
+      return;
+    }
+    const busyKey = `library-delete:${libraryKey(library)}`;
+    setBusy(busyKey);
+    setError(null);
+    try {
+      const updated = await request<Library[]>("/api/libraries", {
+        method: "DELETE",
+        body: JSON.stringify({ kind: library.kind, path: library.path }),
+      });
+      setLibraries(updated);
       await refreshContent();
     } catch (err) {
       setError(messageFrom(err));
@@ -718,22 +788,31 @@ export default function App() {
           <span className="brand-title">影视媒体库工作台</span>
         </button>
         <div className="top-actions">
-          <button type="button" onClick={refresh} disabled={busy === "refresh" || batchRenameApplying}>
+          <AppButton type="button" icon={faRotateRight} label="刷新" onClick={refresh} disabled={busy === "refresh" || batchRenameApplying}>
             {busy === "refresh" ? "刷新中" : "刷新"}
-          </button>
-          <button type="button" onClick={() => setHash({ name: "settings" })}>
+          </AppButton>
+          <AppButton type="button" icon={faGear} label="设置" onClick={() => setHash({ name: "settings" })}>
             设置
-          </button>
-          <button type="button" onClick={logout} disabled={busy === "logout"}>
+          </AppButton>
+          <AppButton type="button" icon={faRightFromBracket} label="退出" onClick={logout} disabled={busy === "logout"}>
             {busy === "logout" ? "退出中" : "退出"}
-          </button>
+          </AppButton>
         </div>
       </header>
 
       {error ? <p className="notice error">{error}</p> : null}
 
       {view.name === "settings" ? (
-        <SettingsView health={health} libraries={libraries} media={media} form={form} busy={busy} onFormChange={setForm} onAddLibrary={addLibrary} />
+        <SettingsView
+          health={health}
+          libraries={libraries}
+          media={media}
+          form={form}
+          busy={busy}
+          onFormChange={setForm}
+          onAddLibrary={addLibrary}
+          onDeleteLibrary={deleteLibrary}
+        />
       ) : null}
 
       {view.name === "library" ? (
@@ -811,9 +890,9 @@ function HomeView({ summaries }: { summaries: LibrarySummary[] }) {
       <section className="empty-state">
         <h2>还没有媒体库</h2>
         <p>先添加一个电影或剧集目录。</p>
-        <button type="button" onClick={() => setHash({ name: "settings" })}>
+        <AppButton type="button" icon={faGear} label="前往设置" onClick={() => setHash({ name: "settings" })}>
           前往设置
-        </button>
+        </AppButton>
       </section>
     );
   }
@@ -841,6 +920,7 @@ function SettingsView({
   busy,
   onFormChange,
   onAddLibrary,
+  onDeleteLibrary,
 }: {
   health: Health | null;
   libraries: Library[];
@@ -849,6 +929,7 @@ function SettingsView({
   busy: string | null;
   onFormChange: (form: Library) => void;
   onAddLibrary: (event: FormEvent<HTMLFormElement>) => void;
+  onDeleteLibrary: (library: Library) => void;
 }) {
   return (
     <>
@@ -872,17 +953,17 @@ function SettingsView({
             <option value="series">剧集</option>
           </select>
           <input value={form.path} onChange={(event) => onFormChange({ ...form, path: event.target.value })} placeholder="/media/movies" required />
-          <button type="submit" disabled={busy === "library"}>
+          <AppButton type="submit" icon={faPlus} label="添加" disabled={busy === "library"}>
             添加
-          </button>
+          </AppButton>
         </form>
-        <LibraryTable libraries={libraries} />
+        <LibraryTable libraries={libraries} busy={busy} onDelete={onDeleteLibrary} />
       </section>
     </>
   );
 }
 
-function LibraryTable({ libraries }: { libraries: Library[] }) {
+function LibraryTable({ libraries, busy, onDelete }: { libraries: Library[]; busy: string | null; onDelete: (library: Library) => void }) {
   return (
     <div className="table-wrap">
       <table>
@@ -891,6 +972,7 @@ function LibraryTable({ libraries }: { libraries: Library[] }) {
             <th>名称</th>
             <th>类型</th>
             <th>路径</th>
+            <th>操作</th>
           </tr>
         </thead>
         <tbody>
@@ -899,11 +981,23 @@ function LibraryTable({ libraries }: { libraries: Library[] }) {
               <td>{library.name}</td>
               <td>{library.kind}</td>
               <td className="path">{library.path}</td>
+              <td>
+                <div className="actions compact-actions">
+                  <IconButton
+                    type="button"
+                    icon={faTrash}
+                    label="删除媒体库"
+                    className="danger-button"
+                    onClick={() => onDelete(library)}
+                    disabled={busy === `library-delete:${libraryKey(library)}`}
+                  />
+                </div>
+              </td>
             </tr>
           ))}
           {libraries.length === 0 ? (
             <tr>
-              <td colSpan={3} className="empty">
+              <td colSpan={4} className="empty">
                 未配置媒体目录
               </td>
             </tr>
@@ -956,9 +1050,9 @@ function LibraryDetailView({
       <section className="empty-state">
         <h2>未找到媒体库</h2>
         <p>该媒体库可能已被删除。</p>
-        <button type="button" onClick={() => setHash({ name: "home" })}>
+        <AppButton type="button" icon={faHouse} label="返回首页" onClick={() => setHash({ name: "home" })}>
           返回首页
-        </button>
+        </AppButton>
       </section>
     );
   }
@@ -994,25 +1088,27 @@ function LibraryDetailView({
         </div>
         {selectedSeries ? (
           <div className="top-actions">
-            <button
+            <AppButton
               type="button"
+              icon={faWandMagicSparkles}
+              label="批量重命名"
               onClick={() => onBatchRename([{ key: selectedSeries.key, item: selectedSeries.representative, items: selectedSeries.items }])}
               disabled={busy === "batch-rename-preview"}
             >
               {busy === "batch-rename-preview" ? "生成预览中" : "批量重命名"}
-            </button>
-            <button type="button" className="link-button" onClick={() => setSelectedSeriesKey(null)}>
+            </AppButton>
+            <AppButton type="button" icon={faArrowLeft} label="返回剧集列表" className="link-button" onClick={() => setSelectedSeriesKey(null)}>
               返回剧集列表
-            </button>
+            </AppButton>
           </div>
         ) : (
           <div className="top-actions">
-            <button type="button" onClick={onAudit} disabled={busy === "audit"}>
+            <AppButton type="button" icon={faClipboardCheck} label="检查媒体库" onClick={onAudit} disabled={busy === "audit"}>
               {busy === "audit" ? "检查中" : "检查媒体库"}
-            </button>
-            <button type="button" className="link-button" onClick={() => setHash({ name: "home" })}>
+            </AppButton>
+            <AppButton type="button" icon={faHouse} label="返回媒体库" className="link-button" onClick={() => setHash({ name: "home" })}>
               返回媒体库
-            </button>
+            </AppButton>
           </div>
         )}
       </div>
@@ -1021,21 +1117,28 @@ function LibraryDetailView({
           <IssueFilterBar filters={issueFilters} onToggle={toggleIssueFilter} />
           <div className="batch-toolbar">
             <span>已选择 {selectedTargets.length} 项</span>
-            <button type="button" className="link-button" onClick={() => setSelectedKeys(visibleTargets.map((target) => target.key))} disabled={visibleTargets.length === 0}>
+            <AppButton
+              type="button"
+              icon={faCheck}
+              label="全选当前结果"
+              className="link-button"
+              onClick={() => setSelectedKeys(visibleTargets.map((target) => target.key))}
+              disabled={visibleTargets.length === 0}
+            >
               全选当前结果
-            </button>
-            <button type="button" className="link-button" onClick={() => setSelectedKeys([])} disabled={selectedKeys.length === 0}>
+            </AppButton>
+            <AppButton type="button" icon={faXmark} label="清空选择" className="link-button" onClick={() => setSelectedKeys([])} disabled={selectedKeys.length === 0}>
               清空选择
-            </button>
-            <button type="button" onClick={() => onBatchMetadata(selectedTargets)} disabled={!canBatchMetadata}>
+            </AppButton>
+            <AppButton type="button" icon={faLayerGroup} label="批量刮削" onClick={() => onBatchMetadata(selectedTargets)} disabled={!canBatchMetadata}>
               批量刮削
-            </button>
-            <button type="button" onClick={() => onBatchSubtitles(selectedTargets)} disabled={!canBatchSubtitles}>
+            </AppButton>
+            <AppButton type="button" icon={faClosedCaptioning} label="批量字幕" onClick={() => onBatchSubtitles(selectedTargets)} disabled={!canBatchSubtitles}>
               批量字幕
-            </button>
-            <button type="button" onClick={() => onBatchRename(selectedTargets)} disabled={!canBatchRename || busy === "batch-rename-preview"}>
+            </AppButton>
+            <AppButton type="button" icon={faWandMagicSparkles} label="批量重命名" onClick={() => onBatchRename(selectedTargets)} disabled={!canBatchRename || busy === "batch-rename-preview"}>
               {busy === "batch-rename-preview" ? "生成预览中" : "批量重命名"}
-            </button>
+            </AppButton>
           </div>
         </>
       ) : null}
@@ -1127,7 +1230,7 @@ function SeriesTable({
               <td className="selection-cell">
                 <input type="checkbox" checked={selectedKeys.includes(show.key)} onChange={() => onToggle(show.key)} aria-label={`选择 ${mediaTitle(show)}`} />
               </td>
-              <td>{mediaTitle(show)}</td>
+              <td className="title-cell">{mediaTitle(show)}</td>
               <td>{seasonCountLabel(show)}</td>
               <td>{show.items.length}</td>
               <td className={show.missingNfo === 0 ? "good" : "warn"}>{nfoLabel(show)}</td>
@@ -1140,18 +1243,17 @@ function SeriesTable({
               <td className="path">{relativeLibraryPath(show.path, show.representative.library_path)}</td>
               <td>
                 <div className="actions">
-                  <button type="button" onClick={() => onSearch(show.representative)} disabled={busy === `metadata-search:${show.representative.id}`}>
-                    刮削
-                  </button>
-                  <button type="button" onClick={() => onOpen(show.key)}>
-                    查看详情
-                  </button>
-                  <button type="button" onClick={() => onShowFiles(show.representative)} disabled={busy === `files:${show.representative.id}`}>
-                    详细文件
-                  </button>
-                  <button type="button" className="danger-button" onClick={() => onDelete(show.representative)} disabled={busy === `delete:${show.representative.id}`}>
-                    {busy === `delete:${show.representative.id}` ? "删除中" : "删除"}
-                  </button>
+                  <IconButton type="button" icon={faMagnifyingGlass} label="刮削" onClick={() => onSearch(show.representative)} disabled={busy === `metadata-search:${show.representative.id}`} />
+                  <IconButton type="button" icon={faEye} label="查看详情" onClick={() => onOpen(show.key)} />
+                  <IconButton type="button" icon={faFolderOpen} label="详细文件" onClick={() => onShowFiles(show.representative)} disabled={busy === `files:${show.representative.id}`} />
+                  <IconButton
+                    type="button"
+                    icon={faTrash}
+                    label="删除"
+                    className="danger-button"
+                    onClick={() => onDelete(show.representative)}
+                    disabled={busy === `delete:${show.representative.id}`}
+                  />
                 </div>
               </td>
             </tr>
@@ -1268,7 +1370,7 @@ function Row({
           <input type="checkbox" checked={Boolean(selected)} onChange={onToggle} aria-label={`选择 ${mediaTitle(item)}`} />
         </td>
       ) : null}
-      <td>{item.year ? `${item.title} (${item.year})` : item.title}</td>
+      <td className="title-cell">{item.year ? `${item.title} (${item.year})` : item.title}</td>
       <td>{item.kind}</td>
       <td>{item.season && item.episode ? `S${pad(item.season)}E${pad(item.episode)}` : "-"}</td>
       <td className={item.has_nfo ? "good" : "warn"}>{item.has_nfo ? "已有" : "缺失"}</td>
@@ -1282,23 +1384,13 @@ function Row({
       <td>
         <div className="actions">
           {showMetadata ? (
-            <button type="button" onClick={onSearch} disabled={busy === `metadata-search:${item.id}`}>
-              刮削
-            </button>
+            <IconButton type="button" icon={faMagnifyingGlass} label="刮削" onClick={onSearch} disabled={busy === `metadata-search:${item.id}`} />
           ) : null}
-          <button type="button" onClick={onRename} disabled={busy === `preview:${item.id}` || busy === `rename:${item.id}`}>
-            自动重命名
-          </button>
-          <button type="button" onClick={onSearchSubtitle} disabled={busy === `subtitle-search:${item.id}`}>
-            字幕
-          </button>
-          <button type="button" onClick={onShowFiles} disabled={busy === `files:${item.id}`}>
-            详细文件
-          </button>
+          <IconButton type="button" icon={faWandMagicSparkles} label="自动重命名" onClick={onRename} disabled={busy === `preview:${item.id}` || busy === `rename:${item.id}`} />
+          <IconButton type="button" icon={faClosedCaptioning} label="字幕" onClick={onSearchSubtitle} disabled={busy === `subtitle-search:${item.id}`} />
+          <IconButton type="button" icon={faFolderOpen} label="详细文件" onClick={onShowFiles} disabled={busy === `files:${item.id}`} />
           {onDelete ? (
-            <button type="button" className="danger-button" onClick={onDelete} disabled={busy === `delete:${item.id}`}>
-              {busy === `delete:${item.id}` ? "删除中" : "删除"}
-            </button>
+            <IconButton type="button" icon={faTrash} label="删除" className="danger-button" onClick={onDelete} disabled={busy === `delete:${item.id}`} />
           ) : null}
         </div>
       </td>
@@ -1356,9 +1448,7 @@ function RenameDialogView({
   return (
     <div className="dialog-backdrop">
       <section className="dialog" role="dialog" aria-modal="true" aria-label="自动重命名">
-        <button type="button" className="dialog-close" onClick={onClose} aria-label="关闭">
-          X
-        </button>
+        <IconButton type="button" icon={faXmark} label="关闭" className="dialog-close" onClick={onClose} />
         <div className="section-head">
           <div>
             <h2>自动重命名</h2>
@@ -1380,13 +1470,13 @@ function RenameDialogView({
         ) : null}
         <div className="dialog-actions">
           {hasChanges ? (
-            <button type="button" onClick={() => onApply(dialog)} disabled={!canApply}>
+            <AppButton type="button" icon={faCheck} label="确定" onClick={() => onApply(dialog)} disabled={!canApply}>
               {renaming ? "重命名中" : "确定"}
-            </button>
+            </AppButton>
           ) : null}
-          <button type="button" className="link-button" onClick={onClose}>
+          <AppButton type="button" icon={faXmark} label="取消" className="link-button" onClick={onClose}>
             取消
-          </button>
+          </AppButton>
         </div>
       </section>
     </div>
@@ -1409,9 +1499,7 @@ function BatchRenameDialogView({
   return (
     <div className="dialog-backdrop">
       <section className="dialog batch-rename-dialog" role="dialog" aria-modal="true" aria-label="批量重命名预览">
-        <button type="button" className="dialog-close" onClick={onClose} aria-label="关闭" disabled={applying}>
-          X
-        </button>
+        <IconButton type="button" icon={faXmark} label="关闭" className="dialog-close" onClick={onClose} disabled={applying} />
         <div className="section-head">
           <h2>批量重命名预览</h2>
         </div>
@@ -1439,12 +1527,12 @@ function BatchRenameDialogView({
           })}
         </div>
         <div className="dialog-actions">
-          <button type="button" onClick={() => onApply(dialog)} disabled={!executable || applying}>
+          <AppButton type="button" icon={faCheck} label="确定" onClick={() => onApply(dialog)} disabled={!executable || applying}>
             {applying ? "重命名中" : "确定"}
-          </button>
-          <button type="button" className="link-button" onClick={onClose} disabled={applying}>
+          </AppButton>
+          <AppButton type="button" icon={faXmark} label="取消" className="link-button" onClick={onClose} disabled={applying}>
             取消
-          </button>
+          </AppButton>
         </div>
       </section>
     </div>
@@ -1476,9 +1564,7 @@ function FilesDialogView({ dialog, busy, onClose }: { dialog: FilesDialog; busy:
   return (
     <div className="dialog-backdrop">
       <section className="dialog" role="dialog" aria-modal="true" aria-label="详细文件">
-        <button type="button" className="dialog-close" onClick={onClose} aria-label="关闭">
-          X
-        </button>
+        <IconButton type="button" icon={faXmark} label="关闭" className="dialog-close" onClick={onClose} />
         <div className="section-head">
           <div>
             <h2>详细文件</h2>
@@ -1511,9 +1597,9 @@ function FilesDialogView({ dialog, busy, onClose }: { dialog: FilesDialog; busy:
           <p className="empty">目录下没有文件</p>
         ) : null}
         <div className="dialog-actions">
-          <button type="button" className="link-button" onClick={onClose}>
+          <AppButton type="button" icon={faXmark} label="取消" className="link-button" onClick={onClose}>
             取消
-          </button>
+          </AppButton>
         </div>
       </section>
     </div>
@@ -1546,9 +1632,7 @@ function MetadataDialogView({
   return (
     <div className="dialog-backdrop">
       <section className="dialog" role="dialog" aria-modal="true" aria-label="刮削元数据">
-        <button type="button" className="dialog-close" onClick={onClose} aria-label="关闭" disabled={closeDisabled}>
-          X
-        </button>
+        <IconButton type="button" icon={faXmark} label="关闭" className="dialog-close" onClick={onClose} disabled={closeDisabled} />
         <div className="section-head">
           <div>
             <h2>刮削元数据</h2>
@@ -1558,9 +1642,9 @@ function MetadataDialogView({
         </div>
         <div className="subtitle-form">
           <input value={dialog.query} onChange={(event) => onChange({ ...dialog, query: event.target.value })} aria-label="元数据匹配关键字" />
-          <button type="button" onClick={() => onSearch(dialog)} disabled={searching}>
+          <AppButton type="button" icon={faMagnifyingGlass} label="重新匹配" onClick={() => onSearch(dialog)} disabled={searching}>
             {searching ? "匹配中" : "重新匹配"}
-          </button>
+          </AppButton>
         </div>
         {dialog.error ? <p className="notice error">{dialog.error}</p> : null}
         <div className="subtitle-results">
@@ -1579,17 +1663,17 @@ function MetadataDialogView({
           {dialog.results.length === 0 && !searching ? <p className="empty">暂无候选</p> : null}
         </div>
         <div className="dialog-actions">
-          <button type="button" onClick={() => onApply(dialog)} disabled={dialog.selectedId === undefined || searching || applying}>
+          <AppButton type="button" icon={faCheck} label="确定" onClick={() => onApply(dialog)} disabled={dialog.selectedId === undefined || searching || applying}>
             {applying ? "写入中" : "确定"}
-          </button>
+          </AppButton>
           {onSkip ? (
-            <button type="button" className="link-button" onClick={onSkip} disabled={searching || applying}>
+            <AppButton type="button" icon={faArrowLeft} label="跳过" className="link-button" onClick={onSkip} disabled={searching || applying}>
               跳过
-            </button>
+            </AppButton>
           ) : null}
-          <button type="button" className="link-button" onClick={onClose} disabled={closeDisabled}>
+          <AppButton type="button" icon={faXmark} label={progress ? "取消批量" : "取消"} className="link-button" onClick={onClose} disabled={closeDisabled}>
             {progress ? "取消批量" : "取消"}
-          </button>
+          </AppButton>
         </div>
       </section>
     </div>
@@ -1622,9 +1706,7 @@ function SubtitleDialogView({
   return (
     <div className="dialog-backdrop">
       <section className="dialog" role="dialog" aria-modal="true" aria-label="搜索字幕">
-        <button type="button" className="dialog-close" onClick={onClose} aria-label="关闭" disabled={closeDisabled}>
-          X
-        </button>
+        <IconButton type="button" icon={faXmark} label="关闭" className="dialog-close" onClick={onClose} disabled={closeDisabled} />
         <div className="section-head">
           <div>
             <h2>搜索字幕</h2>
@@ -1634,9 +1716,9 @@ function SubtitleDialogView({
         </div>
         <div className="subtitle-form">
           <input value={dialog.query} onChange={(event) => onChange({ ...dialog, query: event.target.value })} aria-label="字幕搜索关键词" />
-          <button type="button" onClick={() => onSearch(dialog)} disabled={searching}>
+          <AppButton type="button" icon={faMagnifyingGlass} label="重新搜索" onClick={() => onSearch(dialog)} disabled={searching}>
             {searching ? "搜索中" : "重新搜索"}
-          </button>
+          </AppButton>
         </div>
         {dialog.error ? <p className="notice error">{dialog.error}</p> : null}
         <div className="subtitle-results">
@@ -1655,17 +1737,17 @@ function SubtitleDialogView({
           {dialog.results.length === 0 && !searching ? <p className="empty">暂无候选</p> : null}
         </div>
         <div className="dialog-actions">
-          <button type="button" onClick={() => onDownload(dialog)} disabled={dialog.selectedId === undefined || searching || downloading}>
+          <AppButton type="button" icon={faDownload} label="下载字幕" onClick={() => onDownload(dialog)} disabled={dialog.selectedId === undefined || searching || downloading}>
             {downloading ? "下载中" : "下载字幕"}
-          </button>
+          </AppButton>
           {onSkip ? (
-            <button type="button" className="link-button" onClick={onSkip} disabled={searching || downloading}>
+            <AppButton type="button" icon={faArrowLeft} label="跳过" className="link-button" onClick={onSkip} disabled={searching || downloading}>
               跳过
-            </button>
+            </AppButton>
           ) : null}
-          <button type="button" className="link-button" onClick={onClose} disabled={closeDisabled}>
+          <AppButton type="button" icon={faXmark} label={progress ? "取消批量" : "取消"} className="link-button" onClick={onClose} disabled={closeDisabled}>
             {progress ? "取消批量" : "取消"}
-          </button>
+          </AppButton>
         </div>
       </section>
     </div>
@@ -1694,21 +1776,19 @@ function AuditDialogView({
   return (
     <div className="dialog-backdrop">
       <section className="dialog audit-dialog" role="dialog" aria-modal="true" aria-label="媒体库检查结果">
-        <button type="button" className="dialog-close" onClick={onClose} aria-label="关闭" disabled={checking}>
-          X
-        </button>
+        <IconButton type="button" icon={faXmark} label="关闭" className="dialog-close" onClick={onClose} disabled={checking} />
         <div className="section-head">
           <div>
             <h2>媒体库检查结果</h2>
             <p className="batch-progress">{checking ? "正在检查..." : `${allIssues.length} 个问题`}</p>
           </div>
           <div className="top-actions">
-            <button type="button" className="link-button" onClick={onRefresh} disabled={checking}>
+            <AppButton type="button" icon={faRotateRight} label="重新检查" className="link-button" onClick={onRefresh} disabled={checking}>
               重新检查
-            </button>
-            <button type="button" onClick={() => onExport(dialog)} disabled={checking || allIssues.length === 0}>
+            </AppButton>
+            <AppButton type="button" icon={faFileExport} label="导出 CSV" onClick={() => onExport(dialog)} disabled={checking || allIssues.length === 0}>
               导出 CSV
-            </button>
+            </AppButton>
           </div>
         </div>
         {dialog.error ? <p className="notice error">{dialog.error}</p> : null}
@@ -1757,9 +1837,9 @@ function AuditDialogView({
           <p className="empty">{allIssues.length === 0 ? "未发现结构问题" : "当前筛选下没有问题"}</p>
         )}
         <div className="dialog-actions">
-          <button type="button" className="link-button" onClick={onClose} disabled={checking}>
+          <AppButton type="button" icon={faXmark} label="取消" className="link-button" onClick={onClose} disabled={checking}>
             取消
-          </button>
+          </AppButton>
         </div>
       </section>
     </div>
@@ -1775,9 +1855,7 @@ function BatchSummaryDialog({ summary, onClose }: { summary: BatchSummary; onClo
   return (
     <div className="dialog-backdrop">
       <section className="dialog" role="dialog" aria-modal="true" aria-label={summary.title}>
-        <button type="button" className="dialog-close" onClick={onClose} aria-label="关闭">
-          X
-        </button>
+        <IconButton type="button" icon={faXmark} label="关闭" className="dialog-close" onClick={onClose} />
         <div className="section-head">
           <h2>{summary.title}</h2>
         </div>
@@ -1796,9 +1874,9 @@ function BatchSummaryDialog({ summary, onClose }: { summary: BatchSummary; onClo
           </div>
         ) : null}
         <div className="dialog-actions">
-          <button type="button" onClick={onClose}>
+          <AppButton type="button" icon={faCheck} label="确定" onClick={onClose}>
             确定
-          </button>
+          </AppButton>
         </div>
       </section>
     </div>

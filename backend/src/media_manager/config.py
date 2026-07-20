@@ -73,6 +73,25 @@ def append_library(path: Path, name: str, kind: str, library_path: Path) -> None
     path.write_text(_dump_toml(raw), encoding="utf-8")
 
 
+def remove_library(path: Path, kind: str, library_path: Path) -> bool:
+    raw: dict[str, Any] = {}
+    if path.exists():
+        with path.open("rb") as file:
+            raw = tomllib.load(file)
+    libraries = list(raw.get("libraries", []))
+    kept = [
+        library
+        for library in libraries
+        if str(library.get("kind", "movie")) != kind or Path(str(library.get("path", ""))) != library_path
+    ]
+    if len(kept) == len(libraries):
+        return False
+    raw["libraries"] = kept
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_dump_toml(raw), encoding="utf-8")
+    return True
+
+
 def _dump_toml(raw: dict[str, Any]) -> str:
     lines: list[str] = []
     _dump_sections(lines, raw)

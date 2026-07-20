@@ -28,7 +28,7 @@ from .auth import (
     read_session_cookie,
     verify_oauth_state,
 )
-from .config import AppConfig, append_library, load_config
+from .config import AppConfig, append_library, load_config, remove_library
 from .errors import AppError
 from .media import MediaItem, audit_libraries, directory_files, scan_libraries
 from .nfo import write_nfo
@@ -43,6 +43,11 @@ AUTH_PATHS = PUBLIC_PATHS | {"/auth/logout"}
 
 class LibraryInput(BaseModel):
     name: str
+    kind: str
+    path: str
+
+
+class LibraryDeleteInput(BaseModel):
     kind: str
     path: str
 
@@ -162,6 +167,19 @@ def create_app(
             append_library(_config(app).path, input.name, input.kind, library_path)
         except OSError as exc:
             raise AppError("config_write_failed", "写入配置失败", str(exc), input.path) from exc
+        app.state.config = load_config(_config(app).path)
+        return [_library_dict(library) for library in _config(app).libraries]
+
+    @app.delete("/api/libraries")
+    def delete_library(input: LibraryDeleteInput) -> list[dict[str, str]]:
+        if input.kind not in {"movie", "series"}:
+            raise AppError("invalid_library_path", "媒体目录类型必须是 movie 或 series", input.kind, input.path)
+        try:
+            removed = remove_library(_config(app).path, input.kind, Path(input.path))
+        except OSError as exc:
+            raise AppError("config_write_failed", "写入配置失败", str(exc), input.path) from exc
+        if not removed:
+            raise AppError("library_not_found", "媒体库不存在", input.path, status=404)
         app.state.config = load_config(_config(app).path)
         return [_library_dict(library) for library in _config(app).libraries]
 

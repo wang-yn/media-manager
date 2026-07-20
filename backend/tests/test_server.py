@@ -209,6 +209,70 @@ path = "{media_root / "missing"}"
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"]["code"], "invalid_library_path")
 
+    def test_delete_library_removes_config_entry_without_deleting_files(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            media_root = root / "media"
+            config_path = root / "config.toml"
+            movies = media_root / "movies"
+            tv = media_root / "tv"
+            movie = movies / "Dune (2021)" / "Dune (2021).mkv"
+            episode = tv / "Pantheon (2022)" / "Season 01" / "Pantheon - S01E01.mkv"
+            movie.parent.mkdir(parents=True)
+            episode.parent.mkdir(parents=True)
+            movie.write_text("", encoding="utf-8")
+            episode.write_text("", encoding="utf-8")
+            config_path.write_text(
+                f"""
+[paths]
+media_dir = "{media_root}"
+
+[[libraries]]
+name = "Movies"
+kind = "movie"
+path = "{movies}"
+
+[[libraries]]
+name = "TV"
+kind = "series"
+path = "{tv}"
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
+            from media_manager.server import create_app
+
+            client = TestClient(create_app(auth_enabled=False))
+            response = client.request("DELETE", "/api/libraries", json={"kind": "movie", "path": str(movies)})
+            libraries = client.get("/api/libraries").json()
+            media = client.get("/api/media").json()
+            movie_exists = movie.exists()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([library["name"] for library in libraries], ["TV"])
+        self.assertEqual([item["library"] for item in media["items"]], ["TV"])
+        self.assertTrue(movie_exists)
+
+    def test_delete_library_returns_404_when_config_entry_is_missing(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            media_root = root / "media"
+            config_path = root / "config.toml"
+            media_root.mkdir()
+            config_path.write_text(f"[paths]\nmedia_dir = \"{media_root}\"\n", encoding="utf-8")
+            os.environ["MEDIA_MANAGER_CONFIG"] = str(config_path)
+            from media_manager.server import create_app
+
+            response = TestClient(create_app(auth_enabled=False)).request(
+                "DELETE",
+                "/api/libraries",
+                json={"kind": "movie", "path": str(media_root / "movies")},
+            )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["error"]["code"], "library_not_found")
+
     def test_health_reports_assrt_configured_without_exposing_token(self) -> None:
         with TemporaryDirectory() as tmp:
             config_path = Path(tmp) / "config.toml"

@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from media_manager import config as config_module
-from media_manager.config import append_library, load_config
+from media_manager.config import append_library, load_config, remove_library
 
 
 class ConfigTest(unittest.TestCase):
@@ -69,6 +69,38 @@ path = "/media/movies"
 
             with self.assertRaises(ValueError):
                 append_library(config_path, "Bad", "music", Path("/media/music"))
+
+    def test_removes_library_from_existing_config(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config.toml"
+            config_path.write_text(
+                """
+[paths]
+media_dir = "/media"
+
+[tmdb]
+api_key_env = "TMDB_API_KEY"
+
+[[libraries]]
+name = "Movies"
+kind = "movie"
+path = "/media/movies"
+
+[[libraries]]
+name = "TV"
+kind = "series"
+path = "/media/tv"
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            removed = remove_library(config_path, "movie", Path("/media/movies"))
+            config = load_config(config_path)
+
+        self.assertTrue(removed)
+        self.assertEqual([library.name for library in config.libraries], ["TV"])
+        self.assertEqual(config.raw["tmdb"]["api_key_env"], "TMDB_API_KEY")
 
 
 if __name__ == "__main__":

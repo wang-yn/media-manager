@@ -1,3 +1,5 @@
+@import "tailwindcss";
+
 :root {
   color: #1f2933;
   background: #eef2f3;
@@ -16,6 +18,10 @@ body {
 }
 
 button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   min-width: 88px;
   min-height: 40px;
   border: 1px solid #1f6f64;
@@ -23,7 +29,27 @@ button {
   background: #1f6f64;
   color: #fff;
   font: inherit;
+  font-size: 14px;
   cursor: pointer;
+}
+
+.app-button {
+  padding: 0 12px;
+}
+
+.app-button svg {
+  width: 14px;
+}
+
+.icon-button {
+  width: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+}
+
+.icon-button svg {
+  width: 14px;
 }
 
 input,
@@ -53,7 +79,7 @@ button:disabled {
 }
 
 .shell {
-  width: min(1180px, calc(100vw - 32px));
+  width: calc(100% - 24px);
   margin: 0 auto;
   padding: 28px 0 40px;
 }
@@ -89,6 +115,12 @@ button:disabled {
   gap: 10px;
 }
 
+.top-actions .app-button,
+.batch-toolbar .app-button {
+  padding-right: 16px;
+  padding-left: 16px;
+}
+
 .eyebrow,
 h2,
 p {
@@ -101,7 +133,7 @@ p {
 }
 
 h2 {
-  font-size: 18px;
+  font-size: 14px;
 }
 
 .notice {
@@ -202,7 +234,7 @@ h2 {
 }
 
 .library-card strong {
-  font-size: 20px;
+  font-size: 14px;
 }
 
 .empty-state {
@@ -242,6 +274,7 @@ h2 {
   flex-wrap: wrap;
   gap: 10px;
   margin-bottom: 12px;
+  font-size: 13px;
 }
 
 .issue-filters label,
@@ -257,6 +290,7 @@ h2 {
 table {
   width: 100%;
   border-collapse: collapse;
+  font-size: 12px;
 }
 
 th,
@@ -277,11 +311,19 @@ th {
   width: 42px;
 }
 
+.title-cell {
+  font-size: 12px;
+}
+
 .path {
   max-width: 460px;
   overflow-wrap: anywhere;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 13px;
+}
+
+td.path {
+  font-size: 12px;
 }
 
 .empty {
@@ -292,13 +334,25 @@ th {
 
 .actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  min-width: 290px;
+  flex-wrap: nowrap;
+  gap: 6px;
+  min-width: max-content;
 }
 
 .actions button {
-  min-width: 86px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.actions .icon-button {
+  padding: 0;
+}
+
+.compact-actions {
+  min-width: 0;
 }
 
 .danger-button {
@@ -448,7 +502,7 @@ th {
 
 .batch-rename-group h3 {
   margin: 0;
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .dialog-close {
@@ -526,14 +580,17 @@ th {
   flex-wrap: wrap;
   gap: 8px;
   margin: 12px 0;
+  font-size: 13px;
 }
 
 .audit-filter {
   min-width: 0;
   min-height: 34px;
+  padding: 0 10px;
   border-color: #c9d4d8;
   background: #fff;
   color: #1f2933;
+  font-size: 13px;
 }
 
 .audit-filter.active {
