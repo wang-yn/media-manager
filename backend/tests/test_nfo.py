@@ -23,6 +23,7 @@ class NfoTest(unittest.TestCase):
                     "id": 438631,
                     "title": "Dune",
                     "original_title": "Dune",
+                    "english_title": "Dune",
                     "overview": "A noble family becomes embroiled in a war.",
                     "release_date": "2021-09-15",
                 },
@@ -32,6 +33,7 @@ class NfoTest(unittest.TestCase):
         self.assertEqual(nfo_path.name, "movie.nfo")
         self.assertEqual(root.tag, "movie")
         self.assertEqual(root.findtext("title"), "Dune")
+        self.assertEqual(root.findtext("englishtitle"), "Dune")
         self.assertEqual(root.findtext("year"), "2021")
         self.assertEqual(root.findtext("tmdbid"), "438631")
 

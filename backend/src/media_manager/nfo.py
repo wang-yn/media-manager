@@ -51,6 +51,8 @@ def _basic_fields(root: ET.Element, metadata: dict[str, object], item: MediaItem
     ET.SubElement(root, "title").text = str(title)
     if original:
         ET.SubElement(root, "originaltitle").text = str(original)
+    if metadata.get("english_title"):
+        ET.SubElement(root, "englishtitle").text = str(metadata["english_title"])
     if year:
         ET.SubElement(root, "year").text = str(year)
     if metadata.get("overview"):

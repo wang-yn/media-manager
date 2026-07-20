@@ -28,7 +28,12 @@ class TMDBClient:
     def details(self, media_type: str, tmdb_id: int) -> dict[str, object]:
         self._require_key()
         endpoint = f"tv/{tmdb_id}" if media_type == "series" else f"movie/{tmdb_id}"
-        return self._get(endpoint, {"api_key": self.api_key, "language": "zh-CN"})
+        details = self._get(endpoint, {"api_key": self.api_key, "language": "zh-CN"})
+        english = self._get(endpoint, {"api_key": self.api_key, "language": "en-US"})
+        english_title = english.get("name") if media_type == "series" else english.get("title")
+        if english_title:
+            details["english_title"] = english_title
+        return details
 
     def _require_key(self) -> None:
         if not self.api_key:

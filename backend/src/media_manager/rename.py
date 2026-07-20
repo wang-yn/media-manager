@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from pathlib import Path
+import re
 from typing import TypedDict
 import xml.etree.ElementTree as ET
 
 from .errors import AppError
 from .media import MediaItem
 
+
+_LATIN_LETTER = re.compile(r"[A-Za-z]")
 
 RenameChange = TypedDict("RenameChange", {"from": str, "to": str})
 
@@ -28,22 +31,33 @@ class RenameName(TypedDict):
 
 
 def _target_name(item: MediaItem, nfo: Path) -> RenameName:
-    title, original, year = _nfo_values(nfo)
-    display = _join_titles(original, title) if title and original else item.title
+    title, original, english, year = _nfo_values(nfo)
+    display = _display_title(item.title, title, original, english)
     return {"display": display, "year": year or item.year}
 
 
-def _nfo_values(path: Path) -> tuple[str, str, int | None]:
+def _nfo_values(path: Path) -> tuple[str, str, str, int | None]:
     if not path.exists():
-        return "", "", None
+        return "", "", "", None
     try:
         root = ET.parse(path).getroot()
     except (OSError, ET.ParseError):
-        return "", "", None
+        return "", "", "", None
     title = (root.findtext("title") or "").strip()
     original = (root.findtext("originaltitle") or "").strip()
+    english = (root.findtext("englishtitle") or "").strip()
     year_text = (root.findtext("year") or "").strip()
-    return title, original, int(year_text) if year_text.isdigit() else None
+    return title, original, english, int(year_text) if year_text.isdigit() else None
+
+
+def _display_title(scanned: str, local: str, original: str, english: str) -> str:
+    if english:
+        return _join_titles(english, local)
+    if original and _LATIN_LETTER.search(original):
+        return _join_titles(original, local)
+    if original and local:
+        return local
+    return scanned
 
 
 def _join_titles(original: str, local: str) -> str:

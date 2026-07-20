@@ -76,6 +76,86 @@ class RenameTest(unittest.TestCase):
         self.assertIn(root / "Movies" / "Dune - 沙丘 (2021)" / "Dune - 沙丘 (2021).mp4", targets)
         self.assertIn(root / "Movies" / "Dune - 沙丘 (2021)" / "movie.nfo", targets)
 
+    def test_preview_prefers_english_title_over_non_latin_original_title(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            video = root / "Movies" / "Old Name" / "old.name.mkv"
+            movie_nfo = video.parent / "movie.nfo"
+            video.parent.mkdir(parents=True)
+            video.write_text("", encoding="utf-8")
+            movie_nfo.write_text(
+                """
+<movie>
+  <title>82年生的金智英</title>
+  <originaltitle>82년생 김지영</originaltitle>
+  <englishtitle>Kim Ji-young, Born 1982</englishtitle>
+  <year>2019</year>
+</movie>
+""".strip(),
+                encoding="utf-8",
+            )
+            item = MediaItem("movie", "Old Name", str(video), "Movies", str(root / "Movies"))
+
+            preview = preview_rename(item)
+            targets = {Path(change["to"]) for change in preview["changes"]}
+
+        name = "Kim Ji-young, Born 1982 - 82年生的金智英 (2019)"
+        self.assertIn(root / "Movies" / name / f"{name}.mkv", targets)
+
+    def test_preview_uses_english_title_for_chinese_original_title(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            video = root / "Movies" / "Old Name" / "old.name.mkv"
+            movie_nfo = video.parent / "movie.nfo"
+            video.parent.mkdir(parents=True)
+            video.write_text("", encoding="utf-8")
+            movie_nfo.write_text(
+                """
+<movie>
+  <title>万箭穿心</title>
+  <originaltitle>万箭穿心</originaltitle>
+  <englishtitle>Feng Shui</englishtitle>
+  <year>2012</year>
+</movie>
+""".strip(),
+                encoding="utf-8",
+            )
+            item = MediaItem("movie", "Old Name", str(video), "Movies", str(root / "Movies"))
+
+            preview = preview_rename(item)
+            targets = {Path(change["to"]) for change in preview["changes"]}
+
+        name = "Feng Shui - 万箭穿心 (2012)"
+        self.assertIn(root / "Movies" / name / f"{name}.mkv", targets)
+
+    def test_preview_does_not_treat_non_latin_original_title_as_english(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            video = root / "Movies" / "Old Name" / "old.name.mkv"
+            movie_nfo = video.parent / "movie.nfo"
+            video.parent.mkdir(parents=True)
+            video.write_text("", encoding="utf-8")
+            movie_nfo.write_text(
+                """
+<movie>
+  <title>82年生的金智英</title>
+  <originaltitle>82년생 김지영</originaltitle>
+  <year>2019</year>
+</movie>
+""".strip(),
+                encoding="utf-8",
+            )
+            item = MediaItem("movie", "Old Name", str(video), "Movies", str(root / "Movies"))
+
+            preview = preview_rename(item)
+            targets = {Path(change["to"]) for change in preview["changes"]}
+
+        self.assertIn(root / "Movies" / "82年生的金智英 (2019)" / "82年生的金智英 (2019).mkv", targets)
+        self.assertNotIn(
+            root / "Movies" / "82년생 김지영 - 82年生的金智英 (2019)" / "82년생 김지영 - 82年生的金智英 (2019).mkv",
+            targets,
+        )
+
     def test_preview_uses_tvshow_nfo_bilingual_name_and_keeps_sxxexx(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
