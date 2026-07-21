@@ -76,6 +76,31 @@ class RenameTest(unittest.TestCase):
         self.assertIn(root / "Movies" / "Dune - 沙丘 (2021)" / "Dune - 沙丘 (2021).mp4", targets)
         self.assertIn(root / "Movies" / "Dune - 沙丘 (2021)" / "movie.nfo", targets)
 
+    def test_preview_uses_movie_filename_nfo(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            video = root / "Movies" / "Old Name" / "old.name.mp4"
+            nfo = video.with_suffix(".nfo")
+            video.parent.mkdir(parents=True)
+            video.write_text("", encoding="utf-8")
+            nfo.write_text(
+                """
+<movie>
+  <title>沙丘</title>
+  <originaltitle>Dune</originaltitle>
+  <year>2021</year>
+</movie>
+""".strip(),
+                encoding="utf-8",
+            )
+            item = MediaItem("movie", "Old Name", str(video), "Movies", str(root / "Movies"))
+
+            preview = preview_rename(item)
+            targets = {Path(change["to"]) for change in preview["changes"]}
+
+        self.assertIn(root / "Movies" / "Dune - 沙丘 (2021)" / "Dune - 沙丘 (2021).mp4", targets)
+        self.assertIn(root / "Movies" / "Dune - 沙丘 (2021)" / "Dune - 沙丘 (2021).nfo", targets)
+
     def test_preview_prefers_english_title_over_non_latin_original_title(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

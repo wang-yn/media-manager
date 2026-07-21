@@ -120,6 +120,21 @@ class ScanLibrariesTest(unittest.TestCase):
         self.assertEqual(items[0].nfo_path, str(nfo))
         self.assertTrue(items[0].has_nfo)
 
+    def test_marks_movie_filename_nfo(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            movie = root / "movies" / "Dune (2021)" / "Dune (2021).mkv"
+            nfo = movie.with_suffix(".nfo")
+            movie.parent.mkdir(parents=True)
+            movie.write_text("", encoding="utf-8")
+            nfo.write_text("<movie />", encoding="utf-8")
+
+            items = scan_libraries([Library("Movies", "movie", root / "movies")])
+
+        self.assertEqual(items[0].nfo_path, str(nfo))
+        self.assertTrue(items[0].has_nfo)
+        self.assertTrue(items[0].has_metadata)
+
     def test_finds_sidecar_subtitles_when_name_contains_glob_characters(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

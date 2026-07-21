@@ -352,14 +352,14 @@ def _walk_files(root: Path) -> list[Path]:
 def _nfo_path(item: MediaItem) -> Path:
     video = Path(item.path)
     if item.kind == "movie":
-        return video.parent / "movie.nfo"
+        return _movie_nfo_path(video)
     return video.with_suffix(".nfo")
 
 
 def _metadata_path(item: MediaItem) -> Path | None:
     video = Path(item.path)
     if item.kind == "movie":
-        return video.parent / "movie.nfo"
+        return _movie_nfo_path(video)
     if item.kind != "series":
         return None
     library = Path(item.library_path)
@@ -368,3 +368,13 @@ def _metadata_path(item: MediaItem) -> Path | None:
     except (ValueError, IndexError):
         return video.parents[1] / "tvshow.nfo"
     return library / show_name / "tvshow.nfo"
+
+
+def _movie_nfo_path(video: Path) -> Path:
+    movie_nfo = video.parent / "movie.nfo"
+    if movie_nfo.exists():
+        return movie_nfo
+    filename_nfo = video.with_suffix(".nfo")
+    if filename_nfo.exists():
+        return filename_nfo
+    return movie_nfo

@@ -182,7 +182,7 @@ def _target_video(item: MediaItem) -> Path:
     library = Path(item.library_path)
     extension = video.suffix
     if item.kind == "movie":
-        target = _target_name(item, video.parent / "movie.nfo")
+        target = _target_name(item, Path(item.nfo_path) if item.nfo_path else video.parent / "movie.nfo")
         name = _with_year(target["display"], target["year"])
         return library / name / f"{name}{extension}"
     if item.kind == "series":
