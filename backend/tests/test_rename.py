@@ -101,6 +101,42 @@ class RenameTest(unittest.TestCase):
         self.assertIn(root / "Movies" / "Dune - 沙丘 (2021)" / "Dune - 沙丘 (2021).mp4", targets)
         self.assertIn(root / "Movies" / "Dune - 沙丘 (2021)" / "Dune - 沙丘 (2021).nfo", targets)
 
+    def test_preview_prefers_movie_filename_nfo_when_movie_nfo_also_exists(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            video = root / "Movies" / "Old Name" / "old.name.mp4"
+            filename_nfo = video.with_suffix(".nfo")
+            legacy_nfo = video.parent / "movie.nfo"
+            video.parent.mkdir(parents=True)
+            video.write_text("", encoding="utf-8")
+            filename_nfo.write_text(
+                """
+<movie>
+  <title>沙丘</title>
+  <originaltitle>Dune</originaltitle>
+  <year>2021</year>
+</movie>
+""".strip(),
+                encoding="utf-8",
+            )
+            legacy_nfo.write_text(
+                """
+<movie>
+  <title>旧标题</title>
+  <originaltitle>Legacy</originaltitle>
+  <year>1999</year>
+</movie>
+""".strip(),
+                encoding="utf-8",
+            )
+            item = MediaItem("movie", "Old Name", str(video), "Movies", str(root / "Movies"))
+
+            preview = preview_rename(item)
+            targets = {Path(change["to"]) for change in preview["changes"]}
+
+        self.assertIn(root / "Movies" / "Dune - 沙丘 (2021)" / "Dune - 沙丘 (2021).mp4", targets)
+        self.assertNotIn(root / "Movies" / "Legacy - 旧标题 (1999)" / "Legacy - 旧标题 (1999).mp4", targets)
+
     def test_preview_prefers_english_title_over_non_latin_original_title(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

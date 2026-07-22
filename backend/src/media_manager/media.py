@@ -371,10 +371,10 @@ def _metadata_path(item: MediaItem) -> Path | None:
 
 
 def _movie_nfo_path(video: Path) -> Path:
-    movie_nfo = video.parent / "movie.nfo"
-    if movie_nfo.exists():
-        return movie_nfo
     filename_nfo = video.with_suffix(".nfo")
     if filename_nfo.exists():
         return filename_nfo
-    return movie_nfo
+    movie_nfo = video.parent / "movie.nfo"
+    if movie_nfo.exists():
+        return movie_nfo
+    return filename_nfo

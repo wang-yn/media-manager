@@ -20,7 +20,7 @@ def write_nfo(item: MediaItem, metadata: dict[str, object]) -> Path:
 
 
 def _write_movie(item: MediaItem, metadata: dict[str, object]) -> Path:
-    target = Path(item.path).parent / "movie.nfo"
+    target = Path(item.path).with_suffix(".nfo")
     root = ET.Element("movie")
     _basic_fields(root, metadata, item)
     return _write_xml(target, root)

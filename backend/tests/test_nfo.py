@@ -10,7 +10,7 @@ from media_manager.nfo import write_nfo
 
 
 class NfoTest(unittest.TestCase):
-    def test_writes_movie_nfo(self) -> None:
+    def test_writes_movie_filename_nfo(self) -> None:
         with TemporaryDirectory() as tmp:
             movie = Path(tmp) / "Dune (2021)" / "Dune (2021).mkv"
             movie.parent.mkdir()
@@ -30,7 +30,7 @@ class NfoTest(unittest.TestCase):
             )
 
             root = ET.parse(nfo_path).getroot()
-        self.assertEqual(nfo_path.name, "movie.nfo")
+        self.assertEqual(nfo_path.name, "Dune (2021).nfo")
         self.assertEqual(root.tag, "movie")
         self.assertEqual(root.findtext("title"), "Dune")
         self.assertEqual(root.findtext("englishtitle"), "Dune")

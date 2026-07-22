@@ -49,7 +49,7 @@ class ScanLibrariesTest(unittest.TestCase):
         self.assertTrue(items[1].id)
         self.assertEqual(items[0].library_path, str(root / "movies"))
         self.assertEqual(items[1].library_path, str(root / "tv"))
-        self.assertEqual(items[0].nfo_path, str(movie.parent / "movie.nfo"))
+        self.assertEqual(items[0].nfo_path, str(movie.with_suffix(".nfo")))
         self.assertEqual(items[1].nfo_path, str(episode.with_suffix(".nfo")))
         self.assertFalse(items[0].has_nfo)
         self.assertFalse(items[1].has_nfo)
@@ -132,6 +132,23 @@ class ScanLibrariesTest(unittest.TestCase):
             items = scan_libraries([Library("Movies", "movie", root / "movies")])
 
         self.assertEqual(items[0].nfo_path, str(nfo))
+        self.assertTrue(items[0].has_nfo)
+        self.assertTrue(items[0].has_metadata)
+
+    def test_prefers_movie_filename_nfo_when_movie_nfo_also_exists(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            movie = root / "movies" / "Dune (2021)" / "Dune (2021).mkv"
+            filename_nfo = movie.with_suffix(".nfo")
+            legacy_nfo = movie.parent / "movie.nfo"
+            movie.parent.mkdir(parents=True)
+            movie.write_text("", encoding="utf-8")
+            filename_nfo.write_text("<movie />", encoding="utf-8")
+            legacy_nfo.write_text("<movie />", encoding="utf-8")
+
+            items = scan_libraries([Library("Movies", "movie", root / "movies")])
+
+        self.assertEqual(items[0].nfo_path, str(filename_nfo))
         self.assertTrue(items[0].has_nfo)
         self.assertTrue(items[0].has_metadata)
 
